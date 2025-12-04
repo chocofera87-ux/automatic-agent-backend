@@ -27,6 +27,18 @@ interface ConversationContext {
   messageHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
 }
 
+// Map VehicleCategory enum to Machine Global API format
+function mapCategoryToApi(category?: VehicleCategory): 'Carro' | 'Moto' | 'Premium' | 'Corporativo' {
+  if (!category) return 'Carro';
+  const map: Record<VehicleCategory, 'Carro' | 'Moto' | 'Premium' | 'Corporativo'> = {
+    [VehicleCategory.CARRO]: 'Carro',
+    [VehicleCategory.MOTO]: 'Moto',
+    [VehicleCategory.PREMIUM]: 'Premium',
+    [VehicleCategory.CORPORATIVO]: 'Corporativo',
+  };
+  return map[category] || 'Carro';
+}
+
 class ConversationService {
   // Get or create a conversation for a customer
   async getOrCreateConversation(phoneNumber: string, customerName?: string): Promise<Conversation & { customer: { id: string; phoneNumber: string; name: string | null } }> {
@@ -386,7 +398,7 @@ class ConversationService {
         latitude: context.destination?.latitude,
         longitude: context.destination?.longitude,
       },
-      categoria: category,
+      categoria: mapCategoryToApi(category),
     });
 
     if (quote.success && quote.cotacao) {
@@ -515,7 +527,7 @@ class ConversationService {
         nome: conversation.customer.name || 'Cliente WhatsApp',
         telefone: phoneNumber,
       },
-      categoria: context.category || 'Carro',
+      categoria: mapCategoryToApi(context.category),
       formaPagamento: 'D', // Default to cash
     });
 
