@@ -1,0 +1,222 @@
+// Prisma Schema for Mi Chame WhatsApp Taxi Dispatch
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Customer/Passenger model
+model Customer {
+  id            String         @id @default(uuid())
+  phoneNumber   String         @unique
+  name          String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  conversations Conversation[]
+  rides         Ride[]
+
+  @@index([phoneNumber])
+}
+
+// Conversation session with a customer
+model Conversation {
+  id            String              @id @default(uuid())
+  customerId    String
+  customer      Customer            @relation(fields: [customerId], references: [id])
+  state         ConversationState   @default(GREETING)
+  context       Json?               // Store conversation context (origin, destination, etc.)
+  isActive      Boolean             @default(true)
+  lastMessageAt DateTime            @default(now())
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  messages      Message[]
+  ride          Ride?
+
+  @@index([customerId])
+  @@index([isActive])
+}
+
+// Conversation state machine states
+enum ConversationState {
+  GREETING
+  AWAITING_ORIGIN
+  AWAITING_DESTINATION
+  AWAITING_CATEGORY
+  SHOWING_PRICE
+  AWAITING_CONFIRMATION
+  CREATING_RIDE
+  RIDE_CREATED
+  RIDE_IN_PROGRESS
+  RIDE_COMPLETED
+  CANCELLED
+  ERROR
+}
+
+// Individual messages in a conversation
+model Message {
+  id             String        @id @default(uuid())
+  conversationId String
+  conversation   Conversation  @relation(fields: [conversationId], references: [id])
+  direction      MessageDirection
+  content        String
+  messageType    MessageType   @default(TEXT)
+  whatsappMsgId  String?       @unique // WhatsApp message ID
+  metadata       Json?         // Additional data (audio duration, location coords, etc.)
+  createdAt      DateTime      @default(now())
+
+  @@index([conversationId])
+  @@index([whatsappMsgId])
+}
+
+enum MessageDirection {
+  INCOMING
+  OUTGOING
+}
+
+enum MessageType {
+  TEXT
+  AUDIO
+  LOCATION
+  IMAGE
+  INTERACTIVE
+}
+
+// Ride/Trip model
+model Ride {
+  id                String      @id @default(uuid())
+  conversationId    String?     @unique
+  conversation      Conversation? @relation(fields: [conversationId], references: [id])
+  customerId        String
+  customer          Customer    @relation(fields: [customerId], references: [id])
+
+  // Machine Global reference
+  machineRideId     String?     @unique // ID from Machine Global API
+
+  // Location details
+  originAddress     String
+  originLatitude    Float?
+  originLongitude   Float?
+  destinationAddress String
+  destinationLatitude Float?
+  destinationLongitude Float?
+
+  // Ride details
+  category          VehicleCategory @default(CARRO)
+  paymentMethod     PaymentMethod   @default(DINHEIRO)
+  estimatedPrice    Float?
+  finalPrice        Float?
+  estimatedDistance Float?          // in km
+  estimatedDuration Int?            // in minutes
+
+  // Status
+  status            RideStatus      @default(REQUESTED)
+  statusHistory     Json?           // Array of status changes
+
+  // Driver info (populated after acceptance)
+  driverName        String?
+  driverPhone       String?
+  driverVehicle     String?
+  driverPlate       String?
+  driverRating      Float?
+
+  // Timestamps
+  requestedAt       DateTime        @default(now())
+  acceptedAt        DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  cancelledAt       DateTime?
+
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  // Event logs
+  events            RideEvent[]
+
+  @@index([customerId])
+  @@index([status])
+  @@index([machineRideId])
+}
+
+enum VehicleCategory {
+  CARRO
+  MOTO
+  PREMIUM
+  CORPORATIVO
+}
+
+enum PaymentMethod {
+  DINHEIRO      // D - Cash
+  DEBITO        // B - Debit
+  CREDITO       // C - Credit
+  PIX           // X - Pix
+  PICPAY        // P - PicPay
+  WHATSAPP      // H - WhatsApp
+  CARTAO_APP    // A - Card via app
+  FATURADO      // F - Invoiced
+  PIX_APP       // I - Pix via app
+  CARTEIRA      // R - Credit wallet
+}
+
+enum RideStatus {
+  REQUESTED         // Initial request
+  DISTRIBUTING      // D - Looking for drivers
+  AWAITING_ACCEPT   // G - Waiting driver acceptance
+  PENDING           // P - Not accepted, waiting
+  NO_DRIVER         // N - No driver available
+  ACCEPTED          // A - Driver accepted
+  DRIVER_ARRIVING   // Driver on the way
+  DRIVER_ARRIVED    // Driver at pickup
+  IN_PROGRESS       // E - Ride in progress
+  COMPLETED         // F - Ride finished
+  CANCELLED         // C - Cancelled
+  AWAITING_PAYMENT  // R - Waiting payment
+  FAILED            // Error/failed
+}
+
+// Ride events for logging
+model RideEvent {
+  id          String    @id @default(uuid())
+  rideId      String
+  ride        Ride      @relation(fields: [rideId], references: [id])
+  eventType   EventType
+  title       String
+  description String?
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([rideId])
+}
+
+enum EventType {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+}
+
+// Webhook registration for Machine Global callbacks
+model Webhook {
+  id        String   @id @default(uuid())
+  type      String   // 'status' | 'posicao'
+  url       String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// System logs
+model SystemLog {
+  id        String   @id @default(uuid())
+  level     String   // 'info' | 'warn' | 'error' | 'debug'
+  source    String   // 'whatsapp' | 'machine' | 'openai' | 'twilio' | 'system'
+  message   String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([level])
+  @@index([source])
+  @@index([createdAt])
+}
