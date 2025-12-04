@@ -220,3 +220,27 @@ model SystemLog {
   @@index([source])
   @@index([createdAt])
 }
+
+// System credentials (stored securely, user-configurable)
+model SystemCredential {
+  id        String   @id @default(uuid())
+  key       String   @unique // e.g., 'WHATSAPP_ACCESS_TOKEN', 'OPENAI_API_KEY'
+  value     String   // Encrypted value
+  service   String   // 'whatsapp' | 'machine' | 'openai' | 'twilio'
+  isValid   Boolean  @default(false) // Last validation result
+  lastTest  DateTime? // Last time credential was tested
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([service])
+  @@index([key])
+}
+
+// System settings (general configuration)
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
