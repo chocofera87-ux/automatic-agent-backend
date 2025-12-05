@@ -1,11 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { logger } from '../utils/logger.js';
 import { credentialsService, CREDENTIAL_KEYS } from '../services/credentials.service.js';
+import { authenticate, requireAdmin } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
-// Get all credentials (masked)
-router.get('/', async (req: Request, res: Response) => {
+// Get all credentials (masked) - requires authentication
+router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
     const credentials = await credentialsService.getAllCredentials();
 
@@ -32,8 +33,8 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// Get missing required credentials
-router.get('/missing', async (req: Request, res: Response) => {
+// Get missing required credentials - requires authentication
+router.get('/missing', authenticate, async (req: Request, res: Response) => {
   try {
     const missing = await credentialsService.getMissingCredentials();
     const isComplete = missing.length === 0;
@@ -54,8 +55,8 @@ router.get('/missing', async (req: Request, res: Response) => {
   }
 });
 
-// Save credentials for a service
-router.post('/:service', async (req: Request, res: Response) => {
+// Save credentials for a service - requires admin
+router.post('/:service', authenticate, requireAdmin, async (req: Request, res: Response) => {
   try {
     const { service } = req.params;
     const credentials = req.body;
@@ -97,8 +98,8 @@ router.post('/:service', async (req: Request, res: Response) => {
   }
 });
 
-// Test credentials for a service
-router.post('/:service/test', async (req: Request, res: Response) => {
+// Test credentials for a service - requires admin
+router.post('/:service/test', authenticate, requireAdmin, async (req: Request, res: Response) => {
   try {
     const { service } = req.params;
     let result: { success: boolean; error?: string };
@@ -137,8 +138,8 @@ router.post('/:service/test', async (req: Request, res: Response) => {
   }
 });
 
-// Delete a specific credential
-router.delete('/:key', async (req: Request, res: Response) => {
+// Delete a specific credential - requires admin
+router.delete('/:key', authenticate, requireAdmin, async (req: Request, res: Response) => {
   try {
     const { key } = req.params;
 

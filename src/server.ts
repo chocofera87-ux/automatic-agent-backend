@@ -13,6 +13,10 @@ import conversationRoutes from './routes/conversation.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
 import credentialsRoutes from './routes/credentials.routes.js';
+import authRoutes from './routes/auth.routes.js';
+
+// Services
+import { authService } from './services/auth.service.js';
 
 // Load environment variables
 dotenv.config();
@@ -50,6 +54,7 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/webhook', webhookRoutes);
+app.use('/api/auth', authRoutes);
 app.use('/api/rides', rideRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/analytics', analyticsRoutes);
@@ -91,6 +96,17 @@ async function main() {
     // Connect to database
     await prisma.$connect();
     logger.info('Database connected');
+
+    // Create initial admin if not exists
+    await authService.createInitialAdmin();
+
+    // Clean expired sessions periodically
+    setInterval(async () => {
+      const count = await authService.cleanExpiredSessions();
+      if (count > 0) {
+        logger.info(`Cleaned ${count} expired sessions`);
+      }
+    }, 60 * 60 * 1000); // Every hour
 
     // Start listening
     app.listen(PORT, () => {
