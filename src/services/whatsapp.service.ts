@@ -104,6 +104,9 @@ export interface WhatsAppWebhookPayload {
   }>;
 }
 
+// Default verify token for webhook verification
+const DEFAULT_VERIFY_TOKEN = 'michame_verify_token_2024';
+
 class WhatsAppService {
   private client: AxiosInstance;
   private phoneNumberId: string;
@@ -113,7 +116,7 @@ class WhatsAppService {
   constructor() {
     this.accessToken = process.env.WHATSAPP_ACCESS_TOKEN || '';
     this.phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
-    this.verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || '';
+    this.verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || DEFAULT_VERIFY_TOKEN;
 
     this.client = this.createClient();
   }
@@ -159,9 +162,8 @@ class WhatsAppService {
   updateCredentials(accessToken: string, phoneNumberId: string, verifyToken?: string): void {
     this.accessToken = accessToken;
     this.phoneNumberId = phoneNumberId;
-    if (verifyToken) {
-      this.verifyToken = verifyToken;
-    }
+    // Use provided verifyToken or keep default
+    this.verifyToken = verifyToken || DEFAULT_VERIFY_TOKEN;
     this.client = this.createClient();
     logger.info('WhatsApp credentials updated');
   }

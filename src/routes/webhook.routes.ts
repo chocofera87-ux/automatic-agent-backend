@@ -72,7 +72,7 @@ router.get('/whatsapp', async (req: Request, res: Response) => {
   const token = req.query['hub.verify_token'] as string;
   const challenge = req.query['hub.challenge'] as string;
 
-  logger.info('WhatsApp webhook verification request received');
+  logger.info(`WhatsApp webhook verification: mode=${mode}, token=${token ? token.substring(0, 10) + '...' : 'none'}, challenge=${challenge ? 'present' : 'none'}`);
 
   // Load credentials from database before verification
   await loadWhatsAppCredentials();
@@ -80,10 +80,10 @@ router.get('/whatsapp', async (req: Request, res: Response) => {
   const result = whatsappService.verifyWebhook(mode, token, challenge);
 
   if (result) {
-    logger.info('WhatsApp webhook verified successfully');
+    logger.info('WhatsApp webhook verified successfully - returning challenge');
     res.status(200).send(result);
   } else {
-    logger.warn('WhatsApp webhook verification failed');
+    logger.warn(`WhatsApp webhook verification failed - token mismatch or invalid mode`);
     res.status(403).send('Verification failed');
   }
 });
