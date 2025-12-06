@@ -109,16 +109,21 @@ class MachineGlobalService {
   private apiKey: string;
   private username: string;
   private password: string;
+  private baseURL: string;
 
   constructor() {
     this.apiKey = process.env.MACHINE_GLOBAL_API_KEY || '';
     this.username = process.env.MACHINE_GLOBAL_USERNAME || '';
     this.password = process.env.MACHINE_GLOBAL_PASSWORD || '';
+    this.baseURL = process.env.MACHINE_GLOBAL_BASE_URL || 'https://api.taximachine.com.br';
 
-    const baseURL = process.env.MACHINE_GLOBAL_BASE_URL || 'https://api.taximachine.com.br';
+    this.client = this.createClient();
+  }
 
-    this.client = axios.create({
-      baseURL,
+  // Create axios client with current credentials
+  private createClient(): AxiosInstance {
+    const client = axios.create({
+      baseURL: this.baseURL,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -131,7 +136,7 @@ class MachineGlobalService {
     });
 
     // Request interceptor for logging
-    this.client.interceptors.request.use(
+    client.interceptors.request.use(
       (config) => {
         logger.info(`Machine API Request: ${config.method?.toUpperCase()} ${config.url}`);
         return config;
@@ -143,7 +148,7 @@ class MachineGlobalService {
     );
 
     // Response interceptor for logging
-    this.client.interceptors.response.use(
+    client.interceptors.response.use(
       (response) => {
         logger.info(`Machine API Response: ${response.status} ${response.config.url}`);
         return response;
@@ -153,6 +158,25 @@ class MachineGlobalService {
         return Promise.reject(error);
       }
     );
+
+    return client;
+  }
+
+  // Update credentials dynamically (from database)
+  updateCredentials(apiKey: string, username: string, password: string, baseURL?: string): void {
+    this.apiKey = apiKey;
+    this.username = username;
+    this.password = password;
+    if (baseURL) {
+      this.baseURL = baseURL;
+    }
+    this.client = this.createClient();
+    logger.info('Machine Global credentials updated');
+  }
+
+  // Check if credentials are configured
+  hasCredentials(): boolean {
+    return !!(this.apiKey && this.username && this.password);
   }
 
   // Verify API connectivity

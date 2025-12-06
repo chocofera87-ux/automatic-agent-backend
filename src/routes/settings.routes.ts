@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { logger } from '../utils/logger.js';
 import { machineGlobalService } from '../services/machineGlobal.service.js';
 import { whatsappService } from '../services/whatsapp.service.js';
+import { credentialsService } from '../services/credentials.service.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -19,17 +20,52 @@ router.get('/health', async (req: Request, res: Response) => {
       dbStatus = false;
     }
 
-    // Check Machine Global connection
-    const machineStatus = await machineGlobalService.verifyConnection();
+    // Load Machine Global credentials from database and update service
+    let machineStatus = false;
+    try {
+      const machineCredentials = await credentialsService.getServiceCredentials('machine');
+      if (machineCredentials.MACHINE_GLOBAL_API_KEY &&
+          machineCredentials.MACHINE_GLOBAL_USERNAME &&
+          machineCredentials.MACHINE_GLOBAL_PASSWORD) {
+        machineGlobalService.updateCredentials(
+          machineCredentials.MACHINE_GLOBAL_API_KEY,
+          machineCredentials.MACHINE_GLOBAL_USERNAME,
+          machineCredentials.MACHINE_GLOBAL_PASSWORD,
+          machineCredentials.MACHINE_GLOBAL_BASE_URL
+        );
+        machineStatus = await machineGlobalService.verifyConnection();
+      }
+    } catch (e) {
+      logger.error('Error checking Machine Global status:', e);
+      machineStatus = false;
+    }
 
-    // WhatsApp status (assume OK if credentials are configured)
-    const whatsappStatus = !!process.env.WHATSAPP_ACCESS_TOKEN && !!process.env.WHATSAPP_PHONE_NUMBER_ID;
+    // Check WhatsApp credentials from database
+    let whatsappStatus = false;
+    try {
+      const whatsappCredentials = await credentialsService.getServiceCredentials('whatsapp');
+      whatsappStatus = !!(whatsappCredentials.WHATSAPP_ACCESS_TOKEN && whatsappCredentials.WHATSAPP_PHONE_NUMBER_ID);
+    } catch (e) {
+      whatsappStatus = false;
+    }
 
-    // Twilio status
-    const twilioStatus = !!process.env.TWILIO_ACCOUNT_SID && !!process.env.TWILIO_AUTH_TOKEN;
+    // Check Twilio credentials from database
+    let twilioStatus = false;
+    try {
+      const twilioCredentials = await credentialsService.getServiceCredentials('twilio');
+      twilioStatus = !!(twilioCredentials.TWILIO_ACCOUNT_SID && twilioCredentials.TWILIO_AUTH_TOKEN);
+    } catch (e) {
+      twilioStatus = false;
+    }
 
-    // OpenAI status
-    const openaiStatus = !!process.env.OPENAI_API_KEY;
+    // Check OpenAI credentials from database
+    let openaiStatus = false;
+    try {
+      const openaiCredentials = await credentialsService.getServiceCredentials('openai');
+      openaiStatus = !!openaiCredentials.OPENAI_API_KEY;
+    } catch (e) {
+      openaiStatus = false;
+    }
 
     res.json({
       success: true,
