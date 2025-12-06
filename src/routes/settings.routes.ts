@@ -73,7 +73,7 @@ router.get('/health', async (req: Request, res: Response) => {
         status: dbStatus && machineStatus ? 'healthy' : 'degraded',
         services: {
           database: { status: dbStatus ? 'connected' : 'disconnected' },
-          machineGlobal: { status: machineStatus ? 'connected' : 'disconnected' },
+          machine: { status: machineStatus ? 'connected' : 'disconnected' },
           whatsapp: { status: whatsappStatus ? 'configured' : 'not_configured' },
           twilio: { status: twilioStatus ? 'configured' : 'not_configured' },
           openai: { status: openaiStatus ? 'configured' : 'not_configured' },
