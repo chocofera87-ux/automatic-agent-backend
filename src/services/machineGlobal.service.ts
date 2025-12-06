@@ -183,7 +183,13 @@ class MachineGlobalService {
   async verifyConnection(): Promise<boolean> {
     try {
       const response = await this.listWebhooks();
-      return response.success;
+      // Consider connected if we got a response and it's not explicitly failed
+      // Machine Global might return { webhooks: [...] } without a success field
+      if (response.success === false) {
+        return false;
+      }
+      // If we got here without error and success is not false, we're connected
+      return true;
     } catch (error) {
       logger.error('Machine Global connection verification failed:', error);
       return false;
@@ -194,7 +200,13 @@ class MachineGlobalService {
   async listWebhooks(): Promise<WebhookListResponse> {
     try {
       const response = await this.client.get('/listarWebhook');
-      return response.data;
+      // Normalize response - Machine Global might not include success field
+      const data = response.data;
+      return {
+        success: data.success !== false, // true unless explicitly false
+        response: data.response || { webhooks: data.webhooks || [], quantidade_webhooks: data.quantidade_webhooks || 0 },
+        errors: data.errors,
+      };
     } catch (error) {
       return this.handleError(error);
     }
