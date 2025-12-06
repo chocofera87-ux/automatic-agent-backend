@@ -3,20 +3,79 @@ import { logger } from '../utils/logger.js';
 import { whatsappService, WhatsAppWebhookPayload } from '../services/whatsapp.service.js';
 import { conversationService } from '../services/conversation.service.js';
 import { twilioService } from '../services/twilio.service.js';
+import { credentialsService } from '../services/credentials.service.js';
+import { openaiService } from '../services/openai.service.js';
+import { machineGlobalService } from '../services/machineGlobal.service.js';
 
 const router = Router();
+
+// Helper function to load all required credentials from database
+async function loadAllCredentials(): Promise<void> {
+  try {
+    // Load WhatsApp credentials
+    const whatsappCreds = await credentialsService.getServiceCredentials('whatsapp');
+    if (whatsappCreds.WHATSAPP_ACCESS_TOKEN && whatsappCreds.WHATSAPP_PHONE_NUMBER_ID) {
+      whatsappService.updateCredentials(
+        whatsappCreds.WHATSAPP_ACCESS_TOKEN,
+        whatsappCreds.WHATSAPP_PHONE_NUMBER_ID,
+        whatsappCreds.WHATSAPP_VERIFY_TOKEN
+      );
+    }
+
+    // Load OpenAI credentials
+    const openaiCreds = await credentialsService.getServiceCredentials('openai');
+    if (openaiCreds.OPENAI_API_KEY) {
+      openaiService.updateCredentials(openaiCreds.OPENAI_API_KEY);
+    }
+
+    // Load Machine Global credentials
+    const machineCreds = await credentialsService.getServiceCredentials('machine');
+    if (machineCreds.MACHINE_GLOBAL_API_KEY && machineCreds.MACHINE_GLOBAL_USERNAME && machineCreds.MACHINE_GLOBAL_PASSWORD) {
+      machineGlobalService.updateCredentials(
+        machineCreds.MACHINE_GLOBAL_API_KEY,
+        machineCreds.MACHINE_GLOBAL_USERNAME,
+        machineCreds.MACHINE_GLOBAL_PASSWORD,
+        machineCreds.MACHINE_GLOBAL_BASE_URL
+      );
+    }
+  } catch (error) {
+    logger.error('Failed to load credentials from database:', error);
+  }
+}
+
+// Helper function to load WhatsApp credentials only
+async function loadWhatsAppCredentials(): Promise<boolean> {
+  try {
+    const creds = await credentialsService.getServiceCredentials('whatsapp');
+    if (creds.WHATSAPP_ACCESS_TOKEN && creds.WHATSAPP_PHONE_NUMBER_ID) {
+      whatsappService.updateCredentials(
+        creds.WHATSAPP_ACCESS_TOKEN,
+        creds.WHATSAPP_PHONE_NUMBER_ID,
+        creds.WHATSAPP_VERIFY_TOKEN
+      );
+      return true;
+    }
+    return false;
+  } catch (error) {
+    logger.error('Failed to load WhatsApp credentials from database:', error);
+    return false;
+  }
+}
 
 // =====================================================
 // WhatsApp Cloud API Webhooks
 // =====================================================
 
 // Webhook verification (GET request from Meta)
-router.get('/whatsapp', (req: Request, res: Response) => {
+router.get('/whatsapp', async (req: Request, res: Response) => {
   const mode = req.query['hub.mode'] as string;
   const token = req.query['hub.verify_token'] as string;
   const challenge = req.query['hub.challenge'] as string;
 
   logger.info('WhatsApp webhook verification request received');
+
+  // Load credentials from database before verification
+  await loadWhatsAppCredentials();
 
   const result = whatsappService.verifyWebhook(mode, token, challenge);
 
@@ -36,6 +95,11 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
 
     // Acknowledge receipt immediately (Meta requires 200 within 20 seconds)
     res.status(200).send('OK');
+
+    // Load all credentials from database before processing (WhatsApp, OpenAI, Machine Global)
+    await loadAllCredentials();
+
+    logger.info('WhatsApp webhook received - processing messages');
 
     // Parse the webhook payload
     const { messages, statuses } = whatsappService.parseWebhookPayload(payload);

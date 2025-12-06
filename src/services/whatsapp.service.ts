@@ -107,22 +107,30 @@ export interface WhatsAppWebhookPayload {
 class WhatsAppService {
   private client: AxiosInstance;
   private phoneNumberId: string;
+  private accessToken: string;
+  private verifyToken: string;
 
   constructor() {
-    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN || '';
+    this.accessToken = process.env.WHATSAPP_ACCESS_TOKEN || '';
     this.phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
+    this.verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || '';
 
-    this.client = axios.create({
+    this.client = this.createClient();
+  }
+
+  // Create axios client with current credentials
+  private createClient(): AxiosInstance {
+    const client = axios.create({
       baseURL: 'https://graph.facebook.com/v18.0',
       timeout: 30000,
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json',
       },
     });
 
     // Request/Response logging
-    this.client.interceptors.request.use(
+    client.interceptors.request.use(
       (config) => {
         logger.info(`WhatsApp API Request: ${config.method?.toUpperCase()} ${config.url}`);
         return config;
@@ -133,7 +141,7 @@ class WhatsAppService {
       }
     );
 
-    this.client.interceptors.response.use(
+    client.interceptors.response.use(
       (response) => {
         logger.info(`WhatsApp API Response: ${response.status}`);
         return response;
@@ -143,6 +151,24 @@ class WhatsAppService {
         return Promise.reject(error);
       }
     );
+
+    return client;
+  }
+
+  // Update credentials dynamically (from database)
+  updateCredentials(accessToken: string, phoneNumberId: string, verifyToken?: string): void {
+    this.accessToken = accessToken;
+    this.phoneNumberId = phoneNumberId;
+    if (verifyToken) {
+      this.verifyToken = verifyToken;
+    }
+    this.client = this.createClient();
+    logger.info('WhatsApp credentials updated');
+  }
+
+  // Check if credentials are configured
+  hasCredentials(): boolean {
+    return !!(this.accessToken && this.phoneNumberId);
   }
 
   // Send a text message
@@ -459,8 +485,8 @@ class WhatsAppService {
 
   // Verify webhook (for initial setup)
   verifyWebhook(mode: string, token: string, challenge: string): string | null {
-    const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
-    if (mode === 'subscribe' && token === verifyToken) {
+    // Use instance verifyToken (loaded from DB or env)
+    if (mode === 'subscribe' && token === this.verifyToken) {
       return challenge;
     }
     return null;

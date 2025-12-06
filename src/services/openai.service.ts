@@ -65,11 +65,25 @@ Formas de pagamento: Dinheiro, Cartão (débito/crédito), Pix`;
 
 class OpenAIService {
   private client: OpenAI;
+  private apiKey: string;
 
   constructor() {
+    this.apiKey = process.env.OPENAI_API_KEY || '';
     this.client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
+      apiKey: this.apiKey,
     });
+  }
+
+  // Update credentials dynamically (from database)
+  updateCredentials(apiKey: string): void {
+    this.apiKey = apiKey;
+    this.client = new OpenAI({ apiKey });
+    logger.info('OpenAI credentials updated');
+  }
+
+  // Check if credentials are configured
+  hasCredentials(): boolean {
+    return !!this.apiKey;
   }
 
   // Transcribe audio using Whisper
