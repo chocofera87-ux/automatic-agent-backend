@@ -156,21 +156,27 @@ class WhatsAppService {
         return response;
       },
       (error) => {
+        // Log FULL error response for debugging
+        logger.error(`WhatsApp API Error - Status: ${error.response?.status}`);
+        logger.error(`Full Error Response: ${JSON.stringify(error.response?.data, null, 2)}`);
+
         const errorData = error.response?.data?.error;
-        const errorMessage = errorData?.message || error.message;
-        const errorCode = errorData?.code;
-        const errorSubcode = errorData?.error_subcode;
-        const errorType = errorData?.type;
-
-        logger.error(`WhatsApp API Error: ${error.response?.status} - ${errorMessage}`);
-        if (errorCode) logger.error(`  Error Code: ${errorCode}, Subcode: ${errorSubcode}, Type: ${errorType}`);
-        if (errorData?.error_data) logger.error(`  Error Data: ${JSON.stringify(errorData.error_data)}`);
-
-        // Log if credentials might be the issue
-        if (error.response?.status === 400 || error.response?.status === 401) {
-          logger.error(`  Phone Number ID: ${this.phoneNumberId ? 'Set' : 'MISSING'}`);
-          logger.error(`  Access Token: ${this.accessToken ? 'Set (length: ' + this.accessToken.length + ')' : 'MISSING'}`);
+        if (errorData) {
+          logger.error(`Error Details:`);
+          logger.error(`  - Message: ${errorData.message}`);
+          logger.error(`  - Code: ${errorData.code}`);
+          logger.error(`  - Subcode: ${errorData.error_subcode}`);
+          logger.error(`  - Type: ${errorData.type}`);
+          logger.error(`  - FBTrace ID: ${errorData.fbtrace_id}`);
+          if (errorData.error_data) {
+            logger.error(`  - Error Data: ${JSON.stringify(errorData.error_data)}`);
+          }
         }
+
+        // Log credentials status
+        logger.error(`Credentials Status:`);
+        logger.error(`  - Phone Number ID: ${this.phoneNumberId || 'MISSING'}`);
+        logger.error(`  - Access Token: ${this.accessToken ? `SET (${this.accessToken.length} chars)` : 'MISSING'}`);
 
         return Promise.reject(error);
       }

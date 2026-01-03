@@ -229,4 +229,111 @@ router.post('/twilio/status', async (req: Request, res: Response) => {
   }
 });
 
+// =====================================================
+// Test Endpoints (for debugging)
+// =====================================================
+
+// Test sending a plain text message
+router.get('/test-text/:phone', async (req: Request, res: Response) => {
+  try {
+    const phone = req.params.phone;
+
+    // Load credentials from database first
+    await loadWhatsAppCredentials();
+
+    logger.info(`Testing plain text message to: ${phone}`);
+
+    const result = await whatsappService.sendTextMessage(
+      phone,
+      'Olá! Esta é uma mensagem de teste do Mi Chame. Se você recebeu esta mensagem, o sistema está funcionando corretamente!'
+    );
+
+    if (result.success) {
+      logger.info(`Test message sent successfully! Message ID: ${result.messageId}`);
+      res.json({
+        success: true,
+        messageId: result.messageId,
+        message: 'Plain text message sent successfully!'
+      });
+    } else {
+      logger.error(`Test message failed: ${result.error}`);
+      res.status(400).json({
+        success: false,
+        error: result.error,
+        message: 'Failed to send plain text message. Check logs for full error details.'
+      });
+    }
+  } catch (error: any) {
+    logger.error('Test text message error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      message: 'Internal server error during test'
+    });
+  }
+});
+
+// Test sending a location request message
+router.get('/test-location/:phone', async (req: Request, res: Response) => {
+  try {
+    const phone = req.params.phone;
+
+    // Load credentials from database first
+    await loadWhatsAppCredentials();
+
+    logger.info(`Testing location request message to: ${phone}`);
+
+    const result = await whatsappService.sendLocationRequest(
+      phone,
+      'Por favor, compartilhe sua localização atual para que possamos encontrar táxis próximos a você.'
+    );
+
+    if (result.success) {
+      logger.info(`Location request sent successfully! Message ID: ${result.messageId}`);
+      res.json({
+        success: true,
+        messageId: result.messageId,
+        message: 'Location request message sent successfully!'
+      });
+    } else {
+      logger.error(`Location request failed: ${result.error}`);
+      res.status(400).json({
+        success: false,
+        error: result.error,
+        message: 'Failed to send location request. Check logs for full error details.'
+      });
+    }
+  } catch (error: any) {
+    logger.error('Test location request error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      message: 'Internal server error during test'
+    });
+  }
+});
+
+// Check WhatsApp credentials status
+router.get('/test-credentials', async (req: Request, res: Response) => {
+  try {
+    // Load credentials from database
+    await loadWhatsAppCredentials();
+
+    const hasCredentials = whatsappService.hasCredentials();
+
+    res.json({
+      success: true,
+      hasCredentials,
+      message: hasCredentials
+        ? 'WhatsApp credentials are configured'
+        : 'WhatsApp credentials are NOT configured - please set them in the dashboard'
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 export default router;
