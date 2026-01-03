@@ -42,11 +42,13 @@ model Conversation {
 // Conversation state machine states
 enum ConversationState {
   GREETING
-  AWAITING_ORIGIN
+  REQUESTING_LOCATION       // New: First ask for location (Uber-like flow)
+  AWAITING_ORIGIN           // Fallback: Manual origin input if no location shared
+  CONFIRMING_ORIGIN         // New: User confirms auto-detected origin or edits it
   AWAITING_DESTINATION
   AWAITING_CATEGORY
   SHOWING_PRICE
-  AWAITING_CONFIRMATION
+  AWAITING_CONFIRMATION     // Final confirmation with summary before ride creation
   CREATING_RIDE
   RIDE_CREATED
   RIDE_IN_PROGRESS

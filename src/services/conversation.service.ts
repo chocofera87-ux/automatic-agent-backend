@@ -12,6 +12,7 @@ interface ConversationContext {
     address: string;
     latitude?: number;
     longitude?: number;
+    isAutoDetected?: boolean;  // True if origin was auto-detected from location
   };
   destination?: {
     address: string;
@@ -25,6 +26,8 @@ interface ConversationContext {
   estimatedDuration?: number;
   lastIntent?: string;
   messageHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  locationRequestSent?: boolean;  // Track if we already asked for location
+  locationRequestTime?: number;   // Timestamp when location was requested
 }
 
 // Map VehicleCategory enum to Machine Global API format
@@ -203,8 +206,16 @@ class ConversationService {
         await this.handleGreeting(conversation, message, intent, context);
         break;
 
+      case ConversationState.REQUESTING_LOCATION:
+        await this.handleLocationRequest(conversation, message, messageType, metadata, intent, context);
+        break;
+
       case ConversationState.AWAITING_ORIGIN:
         await this.handleOriginInput(conversation, message, messageType, metadata, intent, context);
+        break;
+
+      case ConversationState.CONFIRMING_ORIGIN:
+        await this.handleOriginConfirmation(conversation, message, messageType, metadata, intent, context);
         break;
 
       case ConversationState.AWAITING_DESTINATION:
@@ -231,37 +242,264 @@ class ConversationService {
     }
   }
 
-  // Handle greeting state
+  // Handle greeting state - Uber-like flow: request location first
   private async handleGreeting(
     conversation: Conversation & { customer: { id: string; phoneNumber: string; name: string | null } },
-    message: string,
+    _message: string,
     intent: any,
     context: ConversationContext
   ): Promise<void> {
     const phoneNumber = conversation.customer.phoneNumber;
-    const greeting = await openaiService.generateGreeting(conversation.customer.name || undefined);
+    const customerName = conversation.customer.name;
+
+    // Generate personalized greeting
+    const greeting = customerName
+      ? `Olá, ${customerName}! 👋 Bem-vindo de volta à Mi Chame!`
+      : `Olá! 👋 Bem-vindo à Mi Chame - seu táxi via WhatsApp!`;
 
     // Send greeting
     const result = await whatsappService.sendTextMessage(phoneNumber, greeting);
-
-    // Save outgoing message
     await this.saveOutgoingMessage(conversation.id, greeting, result.messageId);
 
-    // If user already provided origin, process it
-    if (intent.hasOrigin && intent.origin) {
-      context.origin = { address: intent.origin.text };
+    // If user already provided destination in first message (power user), fast-track
+    if (intent.hasDestination && intent.destination) {
+      // User typed destination directly - ask for location to set origin
+      context.destination = { address: intent.destination.text };
+      context.locationRequestSent = true;
+      context.locationRequestTime = Date.now();
+
+      await this.updateConversation(conversation.id, ConversationState.REQUESTING_LOCATION, context);
+
+      const locationMsg = await whatsappService.sendLocationRequest(
+        phoneNumber,
+        `Entendi que você quer ir para: ${intent.destination.text}\n\n📍 Compartilhe sua localização atual para definirmos o ponto de embarque.\n\n(Ou digite o endereço de partida)`
+      );
+      await this.saveOutgoingMessage(conversation.id, 'Solicitando localização para origem', locationMsg.messageId);
+      return;
+    }
+
+    // UBER-LIKE FLOW: First, request user's location
+    context.locationRequestSent = true;
+    context.locationRequestTime = Date.now();
+
+    await this.updateConversation(conversation.id, ConversationState.REQUESTING_LOCATION, context);
+
+    // Request location with clear instructions
+    const locationRequest = await whatsappService.sendLocationRequest(
+      phoneNumber,
+      `Para onde você quer ir hoje?\n\n📍 Primeiro, compartilhe sua localização atual para definirmos o ponto de embarque automaticamente.\n\n💡 Dica: Clique no 📎 e selecione "Localização" → "Enviar sua localização atual"\n\n(Ou se preferir, digite o endereço de partida)`
+    );
+    await this.saveOutgoingMessage(conversation.id, 'Solicitando localização', locationRequest.messageId);
+  }
+
+  // Handle location request response - Uber-like auto-detection
+  private async handleLocationRequest(
+    conversation: Conversation & { customer: { id: string; phoneNumber: string; name: string | null } },
+    message: string,
+    messageType: string,
+    metadata: any,
+    intent: any,
+    context: ConversationContext
+  ): Promise<void> {
+    const phoneNumber = conversation.customer.phoneNumber;
+
+    // Check if user shared their location
+    if (messageType === 'location' && metadata.latitude && metadata.longitude) {
+      // AUTO-DETECT SUCCESS: Set origin from shared location
+      context.origin = {
+        address: metadata.address || metadata.name || `Localização: ${metadata.latitude.toFixed(6)}, ${metadata.longitude.toFixed(6)}`,
+        latitude: metadata.latitude,
+        longitude: metadata.longitude,
+        isAutoDetected: true,
+      };
+
+      // If we already have destination (power user flow), go to category
+      if (context.destination) {
+        await this.updateConversation(conversation.id, ConversationState.AWAITING_CATEGORY, context);
+        await this.showCategorySelection(conversation, context);
+        return;
+      }
+
+      // Standard flow: Ask for destination only
       await this.updateConversation(conversation.id, ConversationState.AWAITING_DESTINATION, context);
 
-      // Ask for destination
-      const destRequest = await whatsappService.sendLocationRequest(
+      const destMsg = await whatsappService.sendLocationRequest(
         phoneNumber,
-        `Entendi! Você está em: ${intent.origin.text}\n\nAgora, para onde você quer ir? Pode digitar o endereço ou compartilhar a localização.`
+        `📍 Embarque definido!\n${context.origin.address}\n\n🎯 Agora, para onde você quer ir?\n\nDigite o endereço de destino ou compartilhe a localização.`
       );
-      await this.saveOutgoingMessage(conversation.id, `Destino solicitado`, destRequest.messageId);
-    } else {
-      // Move to awaiting origin
-      await this.updateConversation(conversation.id, ConversationState.AWAITING_ORIGIN, context);
+      await this.saveOutgoingMessage(conversation.id, `Origem auto-detectada: ${context.origin.address}`, destMsg.messageId);
+      return;
     }
+
+    // User typed text instead of sharing location
+    // Check if it looks like an address (fallback to manual origin)
+    if (message.length > 5) {
+      // Check if user typed a destination instead of origin
+      if (intent.hasDestination && intent.destination) {
+        // User typed destination - set it and still need origin
+        context.destination = { address: intent.destination.text };
+
+        // Ask for origin since they didn't share location
+        await this.updateConversation(conversation.id, ConversationState.AWAITING_ORIGIN, context);
+
+        const originMsg = await whatsappService.sendLocationRequest(
+          phoneNumber,
+          `Destino: ${context.destination.address}\n\n📍 De onde você vai sair? Compartilhe sua localização ou digite o endereço.`
+        );
+        await this.saveOutgoingMessage(conversation.id, 'Aguardando origem', originMsg.messageId);
+        return;
+      }
+
+      // Treat as manual origin input
+      context.origin = { address: message, isAutoDetected: false };
+
+      // If we have destination, go to category
+      if (context.destination) {
+        await this.updateConversation(conversation.id, ConversationState.AWAITING_CATEGORY, context);
+        await this.showCategorySelection(conversation, context);
+        return;
+      }
+
+      // Ask for destination
+      await this.updateConversation(conversation.id, ConversationState.AWAITING_DESTINATION, context);
+
+      const destMsg = await whatsappService.sendLocationRequest(
+        phoneNumber,
+        `📍 Partindo de: ${context.origin.address}\n\n🎯 Para onde você quer ir?`
+      );
+      await this.saveOutgoingMessage(conversation.id, `Origem definida: ${context.origin.address}`, destMsg.messageId);
+      return;
+    }
+
+    // Message too short - check if location request timed out (30 seconds)
+    const locationRequestAge = Date.now() - (context.locationRequestTime || 0);
+    if (locationRequestAge > 30000) {
+      // Fallback to manual input after timeout
+      await this.updateConversation(conversation.id, ConversationState.AWAITING_ORIGIN, context);
+
+      const fallbackMsg = await whatsappService.sendLocationRequest(
+        phoneNumber,
+        `Sem problemas! 📝 Digite o endereço de onde você está para começarmos.`
+      );
+      await this.saveOutgoingMessage(conversation.id, 'Fallback para input manual', fallbackMsg.messageId);
+      return;
+    }
+
+    // Remind user to share location or type address
+    const reminderMsg = await whatsappService.sendLocationRequest(
+      phoneNumber,
+      `📍 Para começar, preciso saber de onde você vai sair.\n\n• Compartilhe sua localização atual, ou\n• Digite o endereço de partida`
+    );
+    await this.saveOutgoingMessage(conversation.id, 'Lembrete de localização', reminderMsg.messageId);
+  }
+
+  // Handle origin confirmation (when user wants to edit auto-detected origin)
+  private async handleOriginConfirmation(
+    conversation: Conversation & { customer: { id: string; phoneNumber: string; name: string | null } },
+    message: string,
+    messageType: string,
+    metadata: any,
+    intent: any,
+    context: ConversationContext
+  ): Promise<void> {
+    const phoneNumber = conversation.customer.phoneNumber;
+    const lowerMessage = message.toLowerCase();
+
+    // User confirmed origin
+    if (intent.isConfirmation || lowerMessage.includes('sim') || lowerMessage.includes('ok') || lowerMessage.includes('correto')) {
+      await this.updateConversation(conversation.id, ConversationState.AWAITING_DESTINATION, context);
+
+      const destMsg = await whatsappService.sendLocationRequest(
+        phoneNumber,
+        `✅ Origem confirmada!\n\n🎯 Para onde você quer ir?`
+      );
+      await this.saveOutgoingMessage(conversation.id, 'Origem confirmada pelo usuário', destMsg.messageId);
+      return;
+    }
+
+    // User wants to change origin
+    if (lowerMessage.includes('mudar') || lowerMessage.includes('alterar') || lowerMessage.includes('outro')) {
+      await this.updateConversation(conversation.id, ConversationState.AWAITING_ORIGIN, context);
+
+      const changeMsg = await whatsappService.sendLocationRequest(
+        phoneNumber,
+        `📍 Digite o novo endereço de partida ou compartilhe outra localização.`
+      );
+      await this.saveOutgoingMessage(conversation.id, 'Usuário quer alterar origem', changeMsg.messageId);
+      return;
+    }
+
+    // User provided new location
+    if (messageType === 'location' && metadata.latitude && metadata.longitude) {
+      context.origin = {
+        address: metadata.address || metadata.name || `${metadata.latitude}, ${metadata.longitude}`,
+        latitude: metadata.latitude,
+        longitude: metadata.longitude,
+        isAutoDetected: true,
+      };
+
+      await this.updateConversation(conversation.id, ConversationState.AWAITING_DESTINATION, context);
+
+      const destMsg = await whatsappService.sendLocationRequest(
+        phoneNumber,
+        `📍 Nova origem: ${context.origin.address}\n\n🎯 Para onde você quer ir?`
+      );
+      await this.saveOutgoingMessage(conversation.id, `Origem atualizada: ${context.origin.address}`, destMsg.messageId);
+      return;
+    }
+
+    // User typed a new address
+    if (message.length > 5) {
+      context.origin = { address: message, isAutoDetected: false };
+
+      await this.updateConversation(conversation.id, ConversationState.AWAITING_DESTINATION, context);
+
+      const destMsg = await whatsappService.sendLocationRequest(
+        phoneNumber,
+        `📍 Partindo de: ${context.origin.address}\n\n🎯 Para onde você quer ir?`
+      );
+      await this.saveOutgoingMessage(conversation.id, `Origem atualizada: ${context.origin.address}`, destMsg.messageId);
+      return;
+    }
+
+    // Ask again
+    const askMsg = await whatsappService.sendButtonMessage(
+      phoneNumber,
+      `📍 Origem atual: ${context.origin?.address}\n\nEstá correto?`,
+      [
+        { id: 'confirm_origin', title: 'Sim, está correto' },
+        { id: 'change_origin', title: 'Não, alterar' },
+      ]
+    );
+    await this.saveOutgoingMessage(conversation.id, 'Confirmando origem', askMsg.messageId);
+  }
+
+  // Helper: Show category selection menu
+  private async showCategorySelection(
+    conversation: Conversation & { customer: { id: string; phoneNumber: string; name: string | null } },
+    context: ConversationContext
+  ): Promise<void> {
+    const phoneNumber = conversation.customer.phoneNumber;
+
+    const response = await whatsappService.sendListMessage(
+      phoneNumber,
+      `🚗 Resumo da sua corrida:\n\n📍 De: ${context.origin?.address}\n🎯 Para: ${context.destination?.address}\n\nEscolha a categoria do veículo:`,
+      'Ver Opções',
+      [
+        {
+          title: 'Categorias Disponíveis',
+          rows: [
+            { id: 'cat_carro', title: '🚗 Carro', description: 'Veículo padrão - melhor custo-benefício' },
+            { id: 'cat_moto', title: '🏍️ Moto', description: 'Mototáxi - mais rápido no trânsito' },
+            { id: 'cat_premium', title: '✨ Premium', description: 'Veículo executivo - mais conforto' },
+            { id: 'cat_corporativo', title: '🏢 Corporativo', description: 'Para empresas - faturamento' },
+          ],
+        },
+      ],
+      'Mi Chame',
+      'Selecione a melhor opção para você'
+    );
+    await this.saveOutgoingMessage(conversation.id, 'Categorias oferecidas', response.messageId);
   }
 
   // Handle origin input
@@ -412,32 +650,51 @@ class ConversationService {
       context.estimatedDuration = 15;
     }
 
-    // Update state to showing price
+    // Update state to showing price - FINAL CONFIRMATION BEFORE RIDE CREATION
     await this.updateConversation(conversation.id, ConversationState.AWAITING_CONFIRMATION, context);
 
-    // Send price confirmation with buttons
-    const priceMessage = openaiService.generatePriceMessage(
-      context.origin?.address || '',
-      context.destination?.address || '',
-      context.estimatedPrice,
-      context.estimatedDistance,
-      context.estimatedDuration,
-      category
-    );
+    // Generate detailed summary message for final confirmation
+    const categoryLabels: Record<string, string> = {
+      CARRO: '🚗 Carro',
+      MOTO: '🏍️ Moto',
+      PREMIUM: '✨ Premium',
+      CORPORATIVO: '🏢 Corporativo',
+    };
+
+    const summaryMessage = `
+📋 *RESUMO DA SUA CORRIDA*
+
+📍 *Embarque:*
+${context.origin?.address}
+
+🎯 *Destino:*
+${context.destination?.address}
+
+${categoryLabels[category] || '🚗 Carro'}
+
+💰 *Valor Estimado:* R$ ${context.estimatedPrice?.toFixed(2) || '0.00'}
+📏 *Distância:* ${context.estimatedDistance?.toFixed(1) || '0'} km
+⏱️ *Tempo estimado:* ${context.estimatedDuration || 0} min
+
+━━━━━━━━━━━━━━━━━━
+
+⚠️ *Confirme para solicitar o motorista*
+A corrida só será criada após sua confirmação.
+`.trim();
 
     const response = await whatsappService.sendButtonMessage(
       phoneNumber,
-      priceMessage,
+      summaryMessage,
       [
-        { id: 'confirm_ride', title: 'Confirmar' },
-        { id: 'change_category', title: 'Mudar Categoria' },
-        { id: 'cancel_ride', title: 'Cancelar' },
+        { id: 'confirm_ride', title: '✅ Confirmar Corrida' },
+        { id: 'change_category', title: '🔄 Mudar Categoria' },
+        { id: 'cancel_ride', title: '❌ Cancelar' },
       ]
     );
-    await this.saveOutgoingMessage(conversation.id, priceMessage, response.messageId);
+    await this.saveOutgoingMessage(conversation.id, 'Resumo enviado - aguardando confirmação final', response.messageId);
   }
 
-  // Handle confirmation
+  // Handle confirmation - FINAL STEP before ride creation
   private async handleConfirmation(
     conversation: Conversation & { customer: { id: string; phoneNumber: string; name: string | null } },
     message: string,
@@ -448,50 +705,57 @@ class ConversationService {
     const lowerMessage = message.toLowerCase();
 
     // Check for change category request
-    if (lowerMessage.includes('mudar') || lowerMessage.includes('change')) {
+    if (lowerMessage.includes('mudar') || lowerMessage.includes('change') || message === 'change_category') {
       await this.updateConversation(conversation.id, ConversationState.AWAITING_CATEGORY, context);
-      const response = await whatsappService.sendListMessage(
-        phoneNumber,
-        'Escolha a nova categoria:',
-        'Escolher',
-        [
-          {
-            title: 'Categorias',
-            rows: [
-              { id: 'cat_carro', title: 'Carro', description: 'Veículo padrão' },
-              { id: 'cat_moto', title: 'Moto', description: 'Mototáxi' },
-              { id: 'cat_premium', title: 'Premium', description: 'Executivo' },
-              { id: 'cat_corporativo', title: 'Corporativo', description: 'Empresas' },
-            ],
-          },
-        ]
-      );
-      await this.saveOutgoingMessage(conversation.id, 'Categorias oferecidas', response.messageId);
+      await this.showCategorySelection(conversation, context);
       return;
     }
 
-    // Check for confirmation
-    if (intent.isConfirmation || lowerMessage.includes('confirm') || message === 'confirm_ride') {
+    // Check for change origin request
+    if (lowerMessage.includes('origem') || lowerMessage.includes('embarque') || lowerMessage.includes('partida')) {
+      await this.updateConversation(conversation.id, ConversationState.AWAITING_ORIGIN, context);
+      const response = await whatsappService.sendLocationRequest(
+        phoneNumber,
+        `📍 Digite o novo endereço de embarque ou compartilhe sua localização.`
+      );
+      await this.saveOutgoingMessage(conversation.id, 'Solicitando nova origem', response.messageId);
+      return;
+    }
+
+    // Check for change destination request
+    if (lowerMessage.includes('destino') || lowerMessage.includes('para onde')) {
+      await this.updateConversation(conversation.id, ConversationState.AWAITING_DESTINATION, context);
+      const response = await whatsappService.sendLocationRequest(
+        phoneNumber,
+        `🎯 Digite o novo endereço de destino ou compartilhe a localização.`
+      );
+      await this.saveOutgoingMessage(conversation.id, 'Solicitando novo destino', response.messageId);
+      return;
+    }
+
+    // Check for confirmation - ONLY CREATE RIDE AFTER EXPLICIT CONFIRMATION
+    if (intent.isConfirmation || lowerMessage.includes('confirm') || lowerMessage.includes('sim') || message === 'confirm_ride') {
       await this.createRide(conversation, context);
       return;
     }
 
     // Check for cancellation
-    if (intent.isCancellation || message === 'cancel_ride') {
+    if (intent.isCancellation || message === 'cancel_ride' || lowerMessage.includes('cancelar')) {
       await this.handleCancellation(conversation, context);
       return;
     }
 
-    // Ask again
+    // User sent something else - show options again
     const response = await whatsappService.sendButtonMessage(
       phoneNumber,
-      'Deseja confirmar a corrida?',
+      `📋 *Sua corrida está pronta!*\n\n📍 De: ${context.origin?.address}\n🎯 Para: ${context.destination?.address}\n💰 Valor: R$ ${context.estimatedPrice?.toFixed(2) || '0.00'}\n\nO que deseja fazer?`,
       [
-        { id: 'confirm_ride', title: 'Sim, Confirmar' },
-        { id: 'cancel_ride', title: 'Cancelar' },
+        { id: 'confirm_ride', title: '✅ Confirmar' },
+        { id: 'change_category', title: '🔄 Alterar' },
+        { id: 'cancel_ride', title: '❌ Cancelar' },
       ]
     );
-    await this.saveOutgoingMessage(conversation.id, 'Aguardando confirmação', response.messageId);
+    await this.saveOutgoingMessage(conversation.id, 'Aguardando confirmação final', response.messageId);
   }
 
   // Create ride in Machine Global
