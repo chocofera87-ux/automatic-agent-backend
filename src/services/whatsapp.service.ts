@@ -119,6 +119,12 @@ class WhatsAppService {
     this.verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || DEFAULT_VERIFY_TOKEN;
 
     this.client = this.createClient();
+
+    // Log credentials status on startup
+    logger.info('WhatsApp Service initialized:');
+    logger.info(`  - Phone Number ID: ${this.phoneNumberId || 'NOT SET'}`);
+    logger.info(`  - Access Token: ${this.accessToken ? `SET (${this.accessToken.length} chars)` : 'NOT SET'}`);
+    logger.info(`  - Verify Token: ${this.verifyToken}`);
   }
 
   // Create axios client with current credentials
@@ -150,7 +156,22 @@ class WhatsAppService {
         return response;
       },
       (error) => {
-        logger.error(`WhatsApp API Error: ${error.response?.status} - ${error.message}`);
+        const errorData = error.response?.data?.error;
+        const errorMessage = errorData?.message || error.message;
+        const errorCode = errorData?.code;
+        const errorSubcode = errorData?.error_subcode;
+        const errorType = errorData?.type;
+
+        logger.error(`WhatsApp API Error: ${error.response?.status} - ${errorMessage}`);
+        if (errorCode) logger.error(`  Error Code: ${errorCode}, Subcode: ${errorSubcode}, Type: ${errorType}`);
+        if (errorData?.error_data) logger.error(`  Error Data: ${JSON.stringify(errorData.error_data)}`);
+
+        // Log if credentials might be the issue
+        if (error.response?.status === 400 || error.response?.status === 401) {
+          logger.error(`  Phone Number ID: ${this.phoneNumberId ? 'Set' : 'MISSING'}`);
+          logger.error(`  Access Token: ${this.accessToken ? 'Set (length: ' + this.accessToken.length + ')' : 'MISSING'}`);
+        }
+
         return Promise.reject(error);
       }
     );
