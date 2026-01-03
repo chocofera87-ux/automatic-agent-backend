@@ -91,14 +91,59 @@ async function reverseGeocode(latitude: number, longitude: number): Promise<stri
   }
 }
 
+// Pricing rules - single source of truth
+interface PricingRule {
+  baseFare: number;
+  pricePerKm: number;
+  pricePerMinute: number;
+  minimumFare: number;
+}
+
+const PRICING_RULES: Record<string, PricingRule> = {
+  LITE: {
+    baseFare: 5.00,
+    pricePerKm: 2.00,
+    pricePerMinute: 0.35,
+    minimumFare: 9.00,
+  },
+  CONFORT: {
+    baseFare: 7.00,
+    pricePerKm: 2.00,
+    pricePerMinute: 0.55,
+    minimumFare: 9.00,
+  },
+};
+
+// Calculate ride price based on category, distance, and duration
+function calculatePrice(category: VehicleCategory, distanceKm: number, durationMinutes: number): number {
+  const rules = PRICING_RULES[category as string] || PRICING_RULES.LITE;
+
+  const calculatedPrice = rules.baseFare +
+    (distanceKm * rules.pricePerKm) +
+    (durationMinutes * rules.pricePerMinute);
+
+  // Apply minimum fare if calculated price is below it
+  return Math.max(calculatedPrice, rules.minimumFare);
+}
+
+// Get estimated price before driver acceptance (only show final price, no km/ETA)
+function getEstimatedPriceForDisplay(category: VehicleCategory, distanceKm: number, durationMinutes: number): {
+  price: number;
+  showDetails: false;  // Before acceptance, never show km/ETA
+} {
+  return {
+    price: calculatePrice(category, distanceKm, durationMinutes),
+    showDetails: false,
+  };
+}
+
 // Map VehicleCategory enum to Machine Global API format
 function mapCategoryToApi(category?: VehicleCategory): 'Carro' | 'Moto' | 'Premium' | 'Corporativo' {
   if (!category) return 'Carro';
+  // Map our categories to Machine Global's categories
   const map: Record<VehicleCategory, 'Carro' | 'Moto' | 'Premium' | 'Corporativo'> = {
-    [VehicleCategory.CARRO]: 'Carro',
-    [VehicleCategory.MOTO]: 'Moto',
-    [VehicleCategory.PREMIUM]: 'Premium',
-    [VehicleCategory.CORPORATIVO]: 'Corporativo',
+    [VehicleCategory.LITE]: 'Carro',
+    [VehicleCategory.CONFORT]: 'Premium',
   };
   return map[category] || 'Carro';
 }
@@ -485,29 +530,20 @@ class ConversationService {
     await this.saveOutgoingMessage(conversation.id, 'Confirmando origem', askMsg.messageId);
   }
 
-  // Helper: Show category selection menu - clean summary, no raw coords
+  // Helper: Show category selection menu - Lite and Confort only
   private async showCategorySelection(
     conversation: Conversation & { customer: { id: string; phoneNumber: string; name: string | null } },
     context: ConversationContext
   ): Promise<void> {
     const phoneNumber = conversation.customer.phoneNumber;
 
-    const response = await whatsappService.sendListMessage(
+    const response = await whatsappService.sendButtonMessage(
       phoneNumber,
-      `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n\nEscolha o veículo:`,
-      'Ver Opções',
+      `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n\nEscolha a categoria:`,
       [
-        {
-          title: 'Categorias',
-          rows: [
-            { id: 'cat_carro', title: 'Carro', description: 'Veículo padrão' },
-            { id: 'cat_moto', title: 'Moto', description: 'Mais rápido' },
-            { id: 'cat_premium', title: 'Premium', description: 'Executivo' },
-            { id: 'cat_corporativo', title: 'Corporativo', description: 'Empresas' },
-          ],
-        },
-      ],
-      'Mi Chame'
+        { id: 'cat_lite', title: 'Lite' },
+        { id: 'cat_confort', title: 'Confort' },
+      ]
     );
     await this.saveOutgoingMessage(conversation.id, 'Categorias oferecidas', response.messageId);
   }
@@ -591,32 +627,28 @@ class ConversationService {
     await this.showCategorySelection(conversation, context);
   }
 
-  // Handle category selection
+  // Handle category selection - Lite or Confort
   private async handleCategorySelection(
     conversation: Conversation & { customer: { id: string; phoneNumber: string; name: string | null } },
     message: string,
-    intent: any,
+    _intent: any,
     context: ConversationContext
   ): Promise<void> {
     const phoneNumber = conversation.customer.phoneNumber;
 
     // Determine category from message
     const lowerMessage = message.toLowerCase();
-    let category: VehicleCategory = VehicleCategory.CARRO;
+    let category: VehicleCategory = VehicleCategory.LITE;
 
-    if (lowerMessage.includes('moto')) {
-      category = VehicleCategory.MOTO;
-    } else if (lowerMessage.includes('premium') || lowerMessage.includes('executivo')) {
-      category = VehicleCategory.PREMIUM;
-    } else if (lowerMessage.includes('corporativo') || lowerMessage.includes('empresa')) {
-      category = VehicleCategory.CORPORATIVO;
-    } else if (intent.category) {
-      category = intent.category.toUpperCase() as VehicleCategory;
+    if (lowerMessage.includes('confort') || message === 'cat_confort') {
+      category = VehicleCategory.CONFORT;
+    } else if (lowerMessage.includes('lite') || message === 'cat_lite') {
+      category = VehicleCategory.LITE;
     }
 
     context.category = category;
 
-    // Get price quote from Machine Global
+    // Get distance/duration estimate from Machine Global (for internal calculation only)
     const quote = await machineGlobalService.getPriceQuote({
       origem: {
         endereco: context.origin?.address || '',
@@ -631,29 +663,33 @@ class ConversationService {
       categoria: mapCategoryToApi(category),
     });
 
+    // Get distance and duration for price calculation (stored but NOT shown to user yet)
+    let distanceKm = 5.0;  // Default fallback
+    let durationMin = 10;  // Default fallback
+
     if (quote.success && quote.cotacao) {
-      context.estimatedPrice = quote.cotacao.valorEstimado;
-      context.estimatedDistance = quote.cotacao.distanciaKm;
-      context.estimatedDuration = quote.cotacao.tempoEstimado;
-    } else {
-      // Use estimated values if API fails
-      context.estimatedPrice = 25.0;
-      context.estimatedDistance = 10.0;
-      context.estimatedDuration = 15;
+      distanceKm = quote.cotacao.distanciaKm || 5.0;
+      durationMin = quote.cotacao.tempoEstimado || 10;
     }
+
+    // Store internally (will only show after driver accepts)
+    context.estimatedDistance = distanceKm;
+    context.estimatedDuration = durationMin;
+
+    // Calculate price using OUR pricing formula (single source of truth)
+    context.estimatedPrice = calculatePrice(category, distanceKm, durationMin);
 
     // Update state to showing price - FINAL CONFIRMATION BEFORE RIDE CREATION
     await this.updateConversation(conversation.id, ConversationState.AWAITING_CONFIRMATION, context);
 
-    // Generate clean summary - no raw coordinates
+    // Category labels
     const categoryLabels: Record<string, string> = {
-      CARRO: 'Carro',
-      MOTO: 'Moto',
-      PREMIUM: 'Premium',
-      CORPORATIVO: 'Corporativo',
+      LITE: 'Lite',
+      CONFORT: 'Confort',
     };
 
-    const summaryMessage = `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n\n🚗 ${categoryLabels[category] || 'Carro'}\n💰 R$ ${context.estimatedPrice?.toFixed(2) || '0.00'}\n⏱️ ${context.estimatedDuration || 0} min`;
+    // UX RULE: Before acceptance, show ONLY price (no km, no ETA)
+    const summaryMessage = `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n\n🚗 ${categoryLabels[category] || 'Lite'}\n💰 R$ ${context.estimatedPrice.toFixed(2)}`;
 
     const response = await whatsappService.sendButtonMessage(
       phoneNumber,
@@ -718,10 +754,11 @@ class ConversationService {
       return;
     }
 
-    // User sent something else - show options again (simple)
+    // User sent something else - show options again (only price, no km/ETA)
+    const categoryLabel = context.category === VehicleCategory.CONFORT ? 'Confort' : 'Lite';
     const response = await whatsappService.sendButtonMessage(
       phoneNumber,
-      `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n💰 R$ ${context.estimatedPrice?.toFixed(2) || '0.00'}`,
+      `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n\n🚗 ${categoryLabel}\n💰 R$ ${context.estimatedPrice?.toFixed(2) || '0.00'}`,
       [
         { id: 'confirm_ride', title: 'Confirmar' },
         { id: 'change_category', title: 'Alterar' },
@@ -780,7 +817,7 @@ class ConversationService {
         destinationAddress: context.destination?.address || '',
         destinationLatitude: context.destination?.latitude,
         destinationLongitude: context.destination?.longitude,
-        category: context.category || VehicleCategory.CARRO,
+        category: context.category || VehicleCategory.LITE,
         paymentMethod: PaymentMethod.DINHEIRO,
         estimatedPrice: context.estimatedPrice,
         estimatedDistance: context.estimatedDistance,
