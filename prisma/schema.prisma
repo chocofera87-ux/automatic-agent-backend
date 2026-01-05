@@ -106,7 +106,7 @@ model Ride {
   destinationLongitude Float?
 
   // Ride details
-  category          VehicleCategory @default(LITE)
+  category          VehicleCategory @default(CARRO_PEQUENO)
   paymentMethod     PaymentMethod   @default(DINHEIRO)
   estimatedPrice    Float?
   finalPrice        Float?
@@ -143,8 +143,8 @@ model Ride {
 }
 
 enum VehicleCategory {
-  LITE        // Base fare R$5, R$2/km, R$0.35/min, min R$9
-  CONFORT     // Base fare R$7, R$2/km, R$0.55/min, min R$9
+  CARRO_PEQUENO  // Small Car (Economic) - Base fare R$5, R$2/km, R$0.35/min, min R$9
+  CARRO_GRANDE   // Large Car (Comfort/Family) - Base fare R$7, R$2/km, R$0.55/min, min R$9
 }
 
 enum PaymentMethod {

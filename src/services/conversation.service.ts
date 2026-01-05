@@ -1,4 +1,4 @@
-import { PrismaClient, ConversationState, Conversation, Message, MessageDirection, MessageType, Ride, RideStatus, VehicleCategory, PaymentMethod } from '@prisma/client';
+import { PrismaClient, ConversationState, Conversation, MessageDirection, MessageType, RideStatus, VehicleCategory, PaymentMethod } from '@prisma/client';
 import axios from 'axios';
 import { logger } from '../utils/logger.js';
 import { whatsappService } from './whatsapp.service.js';
@@ -92,31 +92,41 @@ async function reverseGeocode(latitude: number, longitude: number): Promise<stri
 }
 
 // Pricing rules - single source of truth
+// IMPORTANT: This is the ONLY place where pricing is defined
+// Never use Machine Global pricing - always use these rules
 interface PricingRule {
-  baseFare: number;
-  pricePerKm: number;
-  pricePerMinute: number;
-  minimumFare: number;
+  baseFare: number;       // Base fare in R$
+  pricePerKm: number;     // Price per kilometer in R$
+  pricePerMinute: number; // Price per minute in R$
+  minimumFare: number;    // Minimum fare in R$
+  displayName: string;    // User-friendly name for WhatsApp display
+  description: string;    // Description for user understanding
 }
 
 const PRICING_RULES: Record<string, PricingRule> = {
-  LITE: {
+  CARRO_PEQUENO: {
     baseFare: 5.00,
     pricePerKm: 2.00,
     pricePerMinute: 0.35,
     minimumFare: 9.00,
+    displayName: 'Carro Pequeno',
+    description: 'Econômico',
   },
-  CONFORT: {
+  CARRO_GRANDE: {
     baseFare: 7.00,
     pricePerKm: 2.00,
     pricePerMinute: 0.55,
     minimumFare: 9.00,
+    displayName: 'Carro Grande',
+    description: 'Conforto / Família',
   },
 };
 
 // Calculate ride price based on category, distance, and duration
+// Formula: final_price = base_fare + (distance_km × price_per_km) + (duration_minutes × price_per_minute)
+// Then apply minimum fare if calculated price is below it
 function calculatePrice(category: VehicleCategory, distanceKm: number, durationMinutes: number): number {
-  const rules = PRICING_RULES[category as string] || PRICING_RULES.LITE;
+  const rules = PRICING_RULES[category as string] || PRICING_RULES.CARRO_PEQUENO;
 
   const calculatedPrice = rules.baseFare +
     (distanceKm * rules.pricePerKm) +
@@ -126,24 +136,13 @@ function calculatePrice(category: VehicleCategory, distanceKm: number, durationM
   return Math.max(calculatedPrice, rules.minimumFare);
 }
 
-// Get estimated price before driver acceptance (only show final price, no km/ETA)
-function getEstimatedPriceForDisplay(category: VehicleCategory, distanceKm: number, durationMinutes: number): {
-  price: number;
-  showDetails: false;  // Before acceptance, never show km/ETA
-} {
-  return {
-    price: calculatePrice(category, distanceKm, durationMinutes),
-    showDetails: false,
-  };
-}
-
 // Map VehicleCategory enum to Machine Global API format
 function mapCategoryToApi(category?: VehicleCategory): 'Carro' | 'Moto' | 'Premium' | 'Corporativo' {
   if (!category) return 'Carro';
   // Map our categories to Machine Global's categories
   const map: Record<VehicleCategory, 'Carro' | 'Moto' | 'Premium' | 'Corporativo'> = {
-    [VehicleCategory.LITE]: 'Carro',
-    [VehicleCategory.CONFORT]: 'Premium',
+    [VehicleCategory.CARRO_PEQUENO]: 'Carro',
+    [VehicleCategory.CARRO_GRANDE]: 'Premium',
   };
   return map[category] || 'Carro';
 }
@@ -296,8 +295,6 @@ class ConversationService {
     metadata: any,
     context: ConversationContext
   ): Promise<void> {
-    const phoneNumber = conversation.customer.phoneNumber;
-
     // Extract intent from message
     const intent = await openaiService.extractRideIntent(message, JSON.stringify(context));
 
@@ -530,7 +527,8 @@ class ConversationService {
     await this.saveOutgoingMessage(conversation.id, 'Confirmando origem', askMsg.messageId);
   }
 
-  // Helper: Show category selection menu - Lite and Confort only
+  // Helper: Show category selection menu - Carro Pequeno and Carro Grande
+  // Using user-friendly names that people in small cities understand
   private async showCategorySelection(
     conversation: Conversation & { customer: { id: string; phoneNumber: string; name: string | null } },
     context: ConversationContext
@@ -539,10 +537,10 @@ class ConversationService {
 
     const response = await whatsappService.sendButtonMessage(
       phoneNumber,
-      `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n\nEscolha a categoria:`,
+      `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n\nEscolha o tipo de carro:`,
       [
-        { id: 'cat_lite', title: 'Lite' },
-        { id: 'cat_confort', title: 'Confort' },
+        { id: 'cat_pequeno', title: 'Carro Pequeno' },
+        { id: 'cat_grande', title: 'Carro Grande' },
       ]
     );
     await this.saveOutgoingMessage(conversation.id, 'Categorias oferecidas', response.messageId);
@@ -627,7 +625,7 @@ class ConversationService {
     await this.showCategorySelection(conversation, context);
   }
 
-  // Handle category selection - Lite or Confort
+  // Handle category selection - Carro Pequeno or Carro Grande
   private async handleCategorySelection(
     conversation: Conversation & { customer: { id: string; phoneNumber: string; name: string | null } },
     message: string,
@@ -636,19 +634,22 @@ class ConversationService {
   ): Promise<void> {
     const phoneNumber = conversation.customer.phoneNumber;
 
-    // Determine category from message
+    // Determine category from message - user-friendly names
     const lowerMessage = message.toLowerCase();
-    let category: VehicleCategory = VehicleCategory.LITE;
+    let category: VehicleCategory = VehicleCategory.CARRO_PEQUENO;
 
-    if (lowerMessage.includes('confort') || message === 'cat_confort') {
-      category = VehicleCategory.CONFORT;
-    } else if (lowerMessage.includes('lite') || message === 'cat_lite') {
-      category = VehicleCategory.LITE;
+    if (lowerMessage.includes('grande') || lowerMessage.includes('confort') ||
+        message === 'cat_grande' || message === 'cat_confort') {
+      category = VehicleCategory.CARRO_GRANDE;
+    } else if (lowerMessage.includes('pequeno') || lowerMessage.includes('lite') ||
+               message === 'cat_pequeno' || message === 'cat_lite') {
+      category = VehicleCategory.CARRO_PEQUENO;
     }
 
     context.category = category;
 
-    // Get distance/duration estimate from Machine Global (for internal calculation only)
+    // Get distance/duration estimate from Machine Global (ONLY for distance/duration, NOT price)
+    // We NEVER use Machine Global pricing - only our own pricing rules
     const quote = await machineGlobalService.getPriceQuote({
       origem: {
         endereco: context.origin?.address || '',
@@ -663,13 +664,19 @@ class ConversationService {
       categoria: mapCategoryToApi(category),
     });
 
-    // Get distance and duration for price calculation (stored but NOT shown to user yet)
-    let distanceKm = 5.0;  // Default fallback
-    let durationMin = 10;  // Default fallback
+    // Get distance and duration for price calculation
+    // Use reasonable defaults if Machine Global fails
+    let distanceKm = 3.0;  // Default fallback for short city rides
+    let durationMin = 8;   // Default fallback (~8 min for 3km)
 
     if (quote.success && quote.cotacao) {
-      distanceKm = quote.cotacao.distanciaKm || 5.0;
-      durationMin = quote.cotacao.tempoEstimado || 10;
+      // Only use distance/duration from Machine Global, NEVER use their price
+      distanceKm = quote.cotacao.distanciaKm || 3.0;
+      durationMin = quote.cotacao.tempoEstimado || 8;
+
+      logger.info(`Machine Global quote: ${distanceKm}km, ${durationMin}min (their price ignored: R$${quote.cotacao.valorEstimado})`);
+    } else {
+      logger.warn('Machine Global quote failed, using default distance/duration');
     }
 
     // Store internally (will only show after driver accepts)
@@ -677,19 +684,27 @@ class ConversationService {
     context.estimatedDuration = durationMin;
 
     // Calculate price using OUR pricing formula (single source of truth)
+    // Formula: base_fare + (distance_km × price_per_km) + (duration_minutes × price_per_minute)
     context.estimatedPrice = calculatePrice(category, distanceKm, durationMin);
+
+    // Log price calculation for debugging
+    const rules = PRICING_RULES[category as string];
+    logger.info(`Price calculation: ${rules.baseFare} + (${distanceKm} × ${rules.pricePerKm}) + (${durationMin} × ${rules.pricePerMinute}) = R$${context.estimatedPrice.toFixed(2)}`);
+
+    // PRICING VALIDATION: Ensure price is reasonable before showing to user
+    if (context.estimatedPrice < rules.minimumFare) {
+      context.estimatedPrice = rules.minimumFare;
+      logger.info(`Price below minimum, using minimum fare: R$${rules.minimumFare}`);
+    }
 
     // Update state to showing price - FINAL CONFIRMATION BEFORE RIDE CREATION
     await this.updateConversation(conversation.id, ConversationState.AWAITING_CONFIRMATION, context);
 
-    // Category labels
-    const categoryLabels: Record<string, string> = {
-      LITE: 'Lite',
-      CONFORT: 'Confort',
-    };
+    // Get user-friendly category name from pricing rules
+    const categoryDisplayName = PRICING_RULES[category as string]?.displayName || 'Carro Pequeno';
 
     // UX RULE: Before acceptance, show ONLY price (no km, no ETA)
-    const summaryMessage = `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n\n🚗 ${categoryLabels[category] || 'Lite'}\n💰 R$ ${context.estimatedPrice.toFixed(2)}`;
+    const summaryMessage = `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n\n🚗 ${categoryDisplayName}\n💰 R$ ${context.estimatedPrice.toFixed(2)}`;
 
     const response = await whatsappService.sendButtonMessage(
       phoneNumber,
@@ -755,10 +770,10 @@ class ConversationService {
     }
 
     // User sent something else - show options again (only price, no km/ETA)
-    const categoryLabel = context.category === VehicleCategory.CONFORT ? 'Confort' : 'Lite';
+    const categoryDisplayName = PRICING_RULES[context.category as string]?.displayName || 'Carro Pequeno';
     const response = await whatsappService.sendButtonMessage(
       phoneNumber,
-      `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n\n🚗 ${categoryLabel}\n💰 R$ ${context.estimatedPrice?.toFixed(2) || '0.00'}`,
+      `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n\n🚗 ${categoryDisplayName}\n💰 R$ ${context.estimatedPrice?.toFixed(2) || '0.00'}`,
       [
         { id: 'confirm_ride', title: 'Confirmar' },
         { id: 'change_category', title: 'Alterar' },
@@ -769,11 +784,49 @@ class ConversationService {
   }
 
   // Create ride in Machine Global
+  // IMPORTANT: This function handles ride creation with proper error handling
+  // Errors should show human-friendly messages, not technical errors
   private async createRide(
     conversation: Conversation & { customer: { id: string; phoneNumber: string; name: string | null } },
     context: ConversationContext
   ): Promise<void> {
     const phoneNumber = conversation.customer.phoneNumber;
+
+    // PRICING VALIDATION: Final check before creating ride
+    // Block if pricing data is missing or invalid
+    if (!context.estimatedPrice || context.estimatedPrice <= 0) {
+      logger.error('Pricing validation failed: No valid price before ride creation');
+
+      const errorMsg = await whatsappService.sendButtonMessage(
+        phoneNumber,
+        'Não foi possível calcular o preço da corrida. Por favor, tente novamente.',
+        [
+          { id: 'retry_ride', title: 'Tentar novamente' },
+          { id: 'cancel_ride', title: 'Cancelar' },
+        ]
+      );
+      await this.saveOutgoingMessage(conversation.id, 'Erro: preço inválido', errorMsg.messageId);
+
+      // Go back to category selection to recalculate
+      await this.updateConversation(conversation.id, ConversationState.AWAITING_CATEGORY, context);
+      return;
+    }
+
+    if (!context.origin?.address || !context.destination?.address) {
+      logger.error('Validation failed: Missing origin or destination');
+
+      const errorMsg = await whatsappService.sendButtonMessage(
+        phoneNumber,
+        'Faltam informações sobre o endereço. Por favor, comece novamente.',
+        [
+          { id: 'start_over', title: 'Começar de novo' },
+        ]
+      );
+      await this.saveOutgoingMessage(conversation.id, 'Erro: endereço faltando', errorMsg.messageId);
+
+      await this.updateConversation(conversation.id, ConversationState.GREETING, {});
+      return;
+    }
 
     // Update state
     await this.updateConversation(conversation.id, ConversationState.CREATING_RIDE, context);
@@ -785,77 +838,102 @@ class ConversationService {
     );
     await this.saveOutgoingMessage(conversation.id, 'Buscando motoristas', waitingMsg.messageId);
 
-    // Create ride in Machine Global
-    const rideResult = await machineGlobalService.createRide({
-      origem: {
-        endereco: context.origin?.address || '',
-        latitude: context.origin?.latitude,
-        longitude: context.origin?.longitude,
-      },
-      destino: {
-        endereco: context.destination?.address || '',
-        latitude: context.destination?.latitude,
-        longitude: context.destination?.longitude,
-      },
-      passageiro: {
-        nome: conversation.customer.name || 'Cliente WhatsApp',
-        telefone: phoneNumber,
-      },
-      categoria: mapCategoryToApi(context.category),
-      formaPagamento: 'D', // Default to cash
-    });
+    try {
+      // Create ride in Machine Global
+      const rideResult = await machineGlobalService.createRide({
+        origem: {
+          endereco: context.origin?.address || '',
+          latitude: context.origin?.latitude,
+          longitude: context.origin?.longitude,
+        },
+        destino: {
+          endereco: context.destination?.address || '',
+          latitude: context.destination?.latitude,
+          longitude: context.destination?.longitude,
+        },
+        passageiro: {
+          nome: conversation.customer.name || 'Cliente WhatsApp',
+          telefone: phoneNumber,
+        },
+        categoria: mapCategoryToApi(context.category),
+        formaPagamento: 'D', // Default to cash
+      });
 
-    // Create ride record in our database
-    const ride = await prisma.ride.create({
-      data: {
-        conversationId: conversation.id,
-        customerId: conversation.customer.id,
-        machineRideId: rideResult.corrida?.id,
-        originAddress: context.origin?.address || '',
-        originLatitude: context.origin?.latitude,
-        originLongitude: context.origin?.longitude,
-        destinationAddress: context.destination?.address || '',
-        destinationLatitude: context.destination?.latitude,
-        destinationLongitude: context.destination?.longitude,
-        category: context.category || VehicleCategory.LITE,
-        paymentMethod: PaymentMethod.DINHEIRO,
-        estimatedPrice: context.estimatedPrice,
-        estimatedDistance: context.estimatedDistance,
-        estimatedDuration: context.estimatedDuration,
-        status: RideStatus.DISTRIBUTING,
-      },
-    });
+      // Create ride record in our database (always create local record for tracking)
+      const ride = await prisma.ride.create({
+        data: {
+          conversationId: conversation.id,
+          customerId: conversation.customer.id,
+          machineRideId: rideResult.corrida?.id,
+          originAddress: context.origin?.address || '',
+          originLatitude: context.origin?.latitude,
+          originLongitude: context.origin?.longitude,
+          destinationAddress: context.destination?.address || '',
+          destinationLatitude: context.destination?.latitude,
+          destinationLongitude: context.destination?.longitude,
+          category: context.category || VehicleCategory.CARRO_PEQUENO,
+          paymentMethod: PaymentMethod.DINHEIRO,
+          estimatedPrice: context.estimatedPrice,
+          estimatedDistance: context.estimatedDistance,
+          estimatedDuration: context.estimatedDuration,
+          status: rideResult.success ? RideStatus.DISTRIBUTING : RideStatus.FAILED,
+        },
+      });
 
-    // Log event
-    await prisma.rideEvent.create({
-      data: {
-        rideId: ride.id,
-        eventType: 'INFO',
-        title: 'Corrida criada',
-        description: `Corrida criada via WhatsApp. Machine ID: ${rideResult.corrida?.id || 'N/A'}`,
-      },
-    });
+      // Log event
+      await prisma.rideEvent.create({
+        data: {
+          rideId: ride.id,
+          eventType: rideResult.success ? 'INFO' : 'ERROR',
+          title: rideResult.success ? 'Corrida criada' : 'Falha ao criar corrida',
+          description: rideResult.success
+            ? `Corrida criada via WhatsApp. Machine ID: ${rideResult.corrida?.id || 'N/A'}`
+            : `Erro: ${rideResult.errors?.join(', ') || 'Erro desconhecido'}`,
+        },
+      });
 
-    if (rideResult.success) {
-      await this.updateConversation(conversation.id, ConversationState.RIDE_CREATED, context);
+      if (rideResult.success) {
+        await this.updateConversation(conversation.id, ConversationState.RIDE_CREATED, context);
 
-      const confirmMsg = await whatsappService.sendTextMessage(
-        phoneNumber,
-        `Corrida confirmada!\n\nEstamos procurando um motorista para você. Você receberá uma notificação assim que um motorista aceitar.\n\nCódigo: ${ride.id.slice(0, 8).toUpperCase()}`
-      );
-      await this.saveOutgoingMessage(conversation.id, 'Corrida confirmada', confirmMsg.messageId);
-    } else {
+        const categoryDisplayName = PRICING_RULES[context.category as string]?.displayName || 'Carro Pequeno';
+        const confirmMsg = await whatsappService.sendTextMessage(
+          phoneNumber,
+          `Corrida confirmada!\n\n🚗 ${categoryDisplayName}\n💰 R$ ${context.estimatedPrice.toFixed(2)}\n\nEstamos procurando um motorista para você.\n\nCódigo: ${ride.id.slice(0, 8).toUpperCase()}`
+        );
+        await this.saveOutgoingMessage(conversation.id, 'Corrida confirmada', confirmMsg.messageId);
+      } else {
+        // Machine Global failed - show human-friendly error
+        logger.error('Machine Global createRide failed:', rideResult.errors);
+
+        await this.updateConversation(conversation.id, ConversationState.ERROR, context);
+
+        // Human-friendly error message (not technical)
+        const errorMsg = await whatsappService.sendButtonMessage(
+          phoneNumber,
+          'Não conseguimos encontrar motoristas disponíveis no momento. Por favor, tente novamente em alguns minutos.',
+          [
+            { id: 'retry_ride', title: 'Tentar novamente' },
+            { id: 'cancel_ride', title: 'Cancelar' },
+          ]
+        );
+        await this.saveOutgoingMessage(conversation.id, 'Erro ao criar corrida', errorMsg.messageId);
+      }
+    } catch (error: any) {
+      // Unexpected error - log it but show human-friendly message
+      logger.error('Unexpected error creating ride:', error);
+
       await this.updateConversation(conversation.id, ConversationState.ERROR, context);
 
+      // Human-friendly error message (never show technical details)
       const errorMsg = await whatsappService.sendButtonMessage(
         phoneNumber,
-        'Desculpe, não foi possível criar a corrida no momento. Deseja tentar novamente?',
+        'Ocorreu um problema ao solicitar sua corrida. Por favor, tente novamente.',
         [
           { id: 'retry_ride', title: 'Tentar novamente' },
           { id: 'cancel_ride', title: 'Cancelar' },
         ]
       );
-      await this.saveOutgoingMessage(conversation.id, 'Erro ao criar corrida', errorMsg.messageId);
+      await this.saveOutgoingMessage(conversation.id, 'Erro inesperado', errorMsg.messageId);
     }
   }
 
@@ -939,7 +1017,7 @@ class ConversationService {
   // Handle cancellation
   private async handleCancellation(
     conversation: Conversation & { customer: { id: string; phoneNumber: string; name: string | null } },
-    context: ConversationContext
+    _context: ConversationContext
   ): Promise<void> {
     const phoneNumber = conversation.customer.phoneNumber;
 
