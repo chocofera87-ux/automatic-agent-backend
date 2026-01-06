@@ -5,12 +5,14 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
+    "build": "node scripts/migrate-categories.js && prisma db push && prisma generate && tsc",
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:push": "prisma db push",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "migrate:categories": "node scripts/migrate-categories.js",
+    "db:setup": "node scripts/migrate-categories.js && prisma db push && prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

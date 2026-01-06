@@ -224,7 +224,13 @@ class CredentialsService {
       const apiKey = await this.getCredential('MACHINE_GLOBAL_API_KEY');
       const username = await this.getCredential('MACHINE_GLOBAL_USERNAME');
       const password = await this.getCredential('MACHINE_GLOBAL_PASSWORD');
-      const baseUrl = await this.getCredential('MACHINE_GLOBAL_BASE_URL') || 'https://api.taximachine.com.br';
+      let baseUrl = await this.getCredential('MACHINE_GLOBAL_BASE_URL') || 'https://api.taximachine.com.br';
+
+      // Sanitize base URL - remove any path (e.g., /site/login)
+      const urlMatch = baseUrl.match(/^(https?:\/\/[^\/]+)/);
+      if (urlMatch) {
+        baseUrl = urlMatch[1];
+      }
 
       if (!apiKey || !username || !password) {
         return { success: false, error: 'Missing Machine Global credentials' };

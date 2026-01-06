@@ -168,10 +168,24 @@ class MachineGlobalService {
     this.username = username;
     this.password = password;
     if (baseURL) {
-      this.baseURL = baseURL;
+      // Sanitize the base URL - remove any path after the domain
+      // Users sometimes enter login page URLs like "https://cloud.taximachine.com.br/site/login"
+      // We need just the base domain: "https://cloud.taximachine.com.br"
+      // Use regex to extract protocol and host
+      const urlMatch = baseURL.match(/^(https?:\/\/[^\/]+)/);
+      if (urlMatch) {
+        this.baseURL = urlMatch[1];
+        if (baseURL !== this.baseURL) {
+          logger.warn(`Machine Global Base URL sanitized: "${baseURL}" -> "${this.baseURL}"`);
+        }
+      } else {
+        // If URL doesn't match expected pattern, use as-is
+        this.baseURL = baseURL;
+        logger.warn(`Machine Global Base URL format unexpected: "${baseURL}"`);
+      }
     }
     this.client = this.createClient();
-    logger.info('Machine Global credentials updated');
+    logger.info(`Machine Global credentials updated. BaseURL: ${this.baseURL}`);
   }
 
   // Check if credentials are configured
