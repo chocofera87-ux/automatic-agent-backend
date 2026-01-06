@@ -1,34 +1,79 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../utils/logger.js';
 
-// Types for Machine Global API
-export interface MachineLocation {
-  endereco: string;
-  latitude?: number;
-  longitude?: number;
+// Types for Machine Global API - CORRECT FORMAT per API documentation
+
+// Machine API address format
+export interface MachineAddress {
+  endereco: string;       // Street name
+  numero?: string;        // Street number
+  bairro?: string;        // Neighborhood
+  cidade?: string;        // City
+  uf?: string;            // State (2 letters, e.g., "SP")
+  lat?: string;           // Latitude as STRING
+  lng?: string;           // Longitude as STRING
 }
 
-export interface MachinePassenger {
+// Machine API client (passenger) format
+export interface MachineCliente {
   nome: string;
   telefone: string;
-  documento?: string;
 }
 
+// Machine API stop (parada) format
+export interface MachineParada extends MachineAddress {
+  ordem: number;          // Order in route (0 = first destination)
+}
+
+// Internal interface for our service (converts to Machine format)
 export interface CreateRideRequest {
-  origem: MachineLocation;
-  destino: MachineLocation;
-  passageiro: MachinePassenger;
+  origem: {
+    endereco: string;
+    numero?: string;
+    bairro?: string;
+    cidade?: string;
+    uf?: string;
+    latitude?: number;
+    longitude?: number;
+  };
+  destino: {
+    endereco: string;
+    numero?: string;
+    bairro?: string;
+    cidade?: string;
+    uf?: string;
+    latitude?: number;
+    longitude?: number;
+  };
+  passageiro: {
+    nome: string;
+    telefone: string;
+  };
   categoria_id?: number;  // Machine category ID (numeric)
-  categoria?: string;     // Category name fallback
   formaPagamento?: string; // D, B, C, X, P, H, A, F, I, R
   observacoes?: string;
 }
 
 export interface PriceQuoteRequest {
-  origem: MachineLocation;
-  destino: MachineLocation;
-  categoria_id?: number;  // Machine category ID
-  categoria?: string;
+  origem: {
+    endereco: string;
+    numero?: string;
+    bairro?: string;
+    cidade?: string;
+    uf?: string;
+    latitude?: number;
+    longitude?: number;
+  };
+  destino: {
+    endereco: string;
+    numero?: string;
+    bairro?: string;
+    cidade?: string;
+    uf?: string;
+    latitude?: number;
+    longitude?: number;
+  };
+  categoria_id?: number;
 }
 
 export interface PriceQuoteResponse {
@@ -271,17 +316,32 @@ class MachineGlobalService {
     const endpoint = '/api/integracao/estimativa';
     const fullUrl = `${this.baseURL}${endpoint}`;
 
+    // Build payload in CORRECT Machine API format
+    // partida = origin, paradas = destinations (array)
     const requestPayload: Record<string, any> = {
-      origem: data.origem,
-      destino: data.destino,
+      categoria_id: data.categoria_id || 1,
+      partida: {
+        endereco: data.origem.endereco,
+        numero: data.origem.numero || '',
+        bairro: data.origem.bairro || '',
+        cidade: data.origem.cidade || '',
+        uf: data.origem.uf || 'SP',
+        lat: data.origem.latitude?.toString() || '',
+        lng: data.origem.longitude?.toString() || '',
+      },
+      paradas: [
+        {
+          ordem: 0,
+          endereco: data.destino.endereco,
+          numero: data.destino.numero || '',
+          bairro: data.destino.bairro || '',
+          cidade: data.destino.cidade || '',
+          uf: data.destino.uf || 'SP',
+          lat: data.destino.latitude?.toString() || '',
+          lng: data.destino.longitude?.toString() || '',
+        },
+      ],
     };
-
-    // Use categoria_id if provided
-    if (data.categoria_id) {
-      requestPayload.categoria_id = data.categoria_id;
-    } else if (data.categoria) {
-      requestPayload.categoria = data.categoria;
-    }
 
     logger.info(`========== MACHINE PRICE QUOTE REQUEST ==========`);
     logger.info(`[MACHINE] POST ${fullUrl}`);
@@ -346,36 +406,52 @@ class MachineGlobalService {
 
   // Create a new ride using official Machine Global API
   // Endpoint: POST /api/integracao/abrirSolicitacao
+  // CORRECT PAYLOAD FORMAT per client documentation:
+  // {
+  //   "categoria_id": 1,
+  //   "tipo_pagamento": "D",
+  //   "cliente": { "nome": "...", "telefone": "..." },
+  //   "partida": { "endereco": "...", "numero": "...", "bairro": "...", "cidade": "...", "uf": "...", "lat": "...", "lng": "..." },
+  //   "paradas": [{ "ordem": 0, "endereco": "...", ... }]
+  // }
   async createRide(data: CreateRideRequest): Promise<RideResponse> {
     const endpoint = '/api/integracao/abrirSolicitacao';
     const fullUrl = `${this.baseURL}${endpoint}`;
 
-    // Build request payload - use categoria_id if provided (Machine requires numeric IDs)
+    // Build request payload in CORRECT Machine API format
     const requestPayload: Record<string, any> = {
-      origem: {
-        endereco: data.origem.endereco,
-        latitude: data.origem.latitude,
-        longitude: data.origem.longitude,
-      },
-      destino: {
-        endereco: data.destino.endereco,
-        latitude: data.destino.latitude,
-        longitude: data.destino.longitude,
-      },
-      passageiro: {
+      categoria_id: data.categoria_id || 1,
+      tipo_pagamento: data.formaPagamento || PAYMENT_METHODS.DINHEIRO,
+      cliente: {
         nome: data.passageiro.nome,
-        telefone: data.passageiro.telefone,
-        documento: data.passageiro.documento,
+        telefone: data.passageiro.telefone.replace(/\D/g, ''), // Remove non-digits
       },
-      formaPagamento: data.formaPagamento || PAYMENT_METHODS.DINHEIRO,
-      observacoes: data.observacoes,
+      partida: {
+        endereco: data.origem.endereco,
+        numero: data.origem.numero || '',
+        bairro: data.origem.bairro || '',
+        cidade: data.origem.cidade || '',
+        uf: data.origem.uf || 'SP',
+        lat: data.origem.latitude?.toString() || '',
+        lng: data.origem.longitude?.toString() || '',
+      },
+      paradas: [
+        {
+          ordem: 0,
+          endereco: data.destino.endereco,
+          numero: data.destino.numero || '',
+          bairro: data.destino.bairro || '',
+          cidade: data.destino.cidade || '',
+          uf: data.destino.uf || 'SP',
+          lat: data.destino.latitude?.toString() || '',
+          lng: data.destino.longitude?.toString() || '',
+        },
+      ],
     };
 
-    // IMPORTANT: Use categoria_id (numeric) if provided, otherwise fall back to categoria (string)
-    if (data.categoria_id) {
-      requestPayload.categoria_id = data.categoria_id;
-    } else if (data.categoria) {
-      requestPayload.categoria = data.categoria;
+    // Add observacoes if provided
+    if (data.observacoes) {
+      requestPayload.observacoes = data.observacoes;
     }
 
     // === FULL REQUEST LOG ===

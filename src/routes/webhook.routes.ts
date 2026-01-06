@@ -474,16 +474,24 @@ router.post('/test-machine-price', async (req: Request, res: Response) => {
       machineCreds.MACHINE_GLOBAL_BASE_URL
     );
 
-    // Default test addresses in São Paulo area
+    // Default test addresses in São Paulo area - CORRECT FORMAT per Machine API docs
     const testOrigem = origem || {
-      endereco: 'Rua XV de Novembro, 100, Capivari, SP',
-      latitude: -22.9969,
-      longitude: -47.5077,
+      endereco: 'Rua Regente Feijó',
+      numero: '100',
+      bairro: 'Centro',
+      cidade: 'Capivari',
+      uf: 'SP',
+      latitude: -22.995,
+      longitude: -47.507,
     };
     const testDestino = destino || {
-      endereco: 'Av. Brasil, 500, Santa Bárbara d\'Oeste, SP',
-      latitude: -22.7549,
-      longitude: -47.4143,
+      endereco: 'Rua Virgílio Duarte',
+      numero: '34',
+      bairro: 'Centro',
+      cidade: 'Capivari',
+      uf: 'SP',
+      latitude: -22.9965,
+      longitude: -47.5095,
     };
 
     logger.info(`Testing Machine price quote with categoria_id: ${categoria_id}`);
@@ -539,20 +547,28 @@ router.post('/test-machine-ride', async (req: Request, res: Response) => {
       machineCreds.MACHINE_GLOBAL_BASE_URL
     );
 
-    // Default test data
+    // Default test data - CORRECT FORMAT per Machine API docs
     const testOrigem = origem || {
-      endereco: 'Rua XV de Novembro, 100, Capivari, SP',
-      latitude: -22.9969,
-      longitude: -47.5077,
+      endereco: 'Rua Regente Feijó',
+      numero: '100',
+      bairro: 'Centro',
+      cidade: 'Capivari',
+      uf: 'SP',
+      latitude: -22.995,
+      longitude: -47.507,
     };
     const testDestino = destino || {
-      endereco: 'Av. Brasil, 500, Santa Bárbara d\'Oeste, SP',
-      latitude: -22.7549,
-      longitude: -47.4143,
+      endereco: 'Rua Virgílio Duarte',
+      numero: '34',
+      bairro: 'Centro',
+      cidade: 'Capivari',
+      uf: 'SP',
+      latitude: -22.9965,
+      longitude: -47.5095,
     };
     const testPassageiro = passageiro || {
       nome: 'Teste API',
-      telefone: '+5519999999999',
+      telefone: '19999999999',
     };
 
     logger.info(`Testing Machine ride creation with categoria_id: ${categoria_id}`);
@@ -662,16 +678,24 @@ router.get('/scan-machine-categories', async (req: Request, res: Response) => {
       machineCreds.MACHINE_GLOBAL_BASE_URL
     );
 
-    // Test addresses
+    // Test addresses - CORRECT FORMAT per Machine API docs
     const testOrigem = {
-      endereco: 'Rua XV de Novembro, 100, Capivari, SP',
-      latitude: -22.9969,
-      longitude: -47.5077,
+      endereco: 'Rua Regente Feijó',
+      numero: '100',
+      bairro: 'Centro',
+      cidade: 'Capivari',
+      uf: 'SP',
+      latitude: -22.995,
+      longitude: -47.507,
     };
     const testDestino = {
-      endereco: 'Av. Brasil, 500, Santa Bárbara d\'Oeste, SP',
-      latitude: -22.7549,
-      longitude: -47.4143,
+      endereco: 'Rua Virgílio Duarte',
+      numero: '34',
+      bairro: 'Centro',
+      cidade: 'Capivari',
+      uf: 'SP',
+      latitude: -22.9965,
+      longitude: -47.5095,
     };
 
     // Try category IDs from 1 to 20
