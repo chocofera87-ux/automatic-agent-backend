@@ -295,10 +295,9 @@ class MachineGlobalService {
     }
   }
 
-  // Create a new ride
-  // Supports multiple possible API endpoints for different Machine Global versions
+  // Create a new ride using official Machine Global API
+  // Endpoint: POST /api/integracao/abrirSolicitacao
   async createRide(data: CreateRideRequest): Promise<RideResponse> {
-    // Log the request payload for debugging
     const requestPayload = {
       origem: {
         endereco: data.origem.endereco,
@@ -320,82 +319,35 @@ class MachineGlobalService {
       observacoes: data.observacoes,
     };
 
-    logger.info(`Machine Global createRide - Full BaseURL: ${this.baseURL}`);
+    const endpoint = '/api/integracao/abrirSolicitacao';
+
+    logger.info(`Machine Global createRide - URL: ${this.baseURL}${endpoint}`);
     logger.info(`Machine Global createRide - API Key: ${this.apiKey ? `SET (${this.apiKey.substring(0, 10)}...)` : 'NOT SET'}`);
     logger.info(`Machine Global createRide - Username: ${this.username || 'NOT SET'}`);
-    logger.info(`Machine Global createRide - Password: ${this.password ? 'SET' : 'NOT SET'}`);
-    logger.info(`Machine Global createRide - Request payload: ${JSON.stringify(requestPayload)}`);
+    logger.info(`Machine Global createRide - Payload: ${JSON.stringify(requestPayload)}`);
 
-    // Try multiple possible API endpoints
-    const endpoints = [
-      '/api/integracao/abrirSolicitacao',
-      '/abrirSolicitacao',
-      '/api/solicitacao',
-      '/solicitacao',
-      '/api/corrida',
-      '/corrida',
-    ];
+    try {
+      const response = await this.client.post(endpoint, requestPayload);
 
-    let lastError: any = null;
+      logger.info(`Machine Global createRide - Success! Response: ${JSON.stringify(response.data)}`);
 
-    for (const endpoint of endpoints) {
-      try {
-        logger.info(`Machine Global createRide - Trying endpoint: ${this.baseURL}${endpoint}`);
-        const response = await this.client.post(endpoint, requestPayload);
+      return {
+        success: true,
+        corrida: response.data.corrida || response.data,
+      };
+    } catch (error: any) {
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const errorData = error.response?.data;
 
-        logger.info(`Machine Global createRide - Endpoint ${endpoint} succeeded!`);
-        logger.info(`Machine Global createRide - Response: ${JSON.stringify(response.data)}`);
-
-        // Check if response indicates success
-        if (response.data.success !== false) {
-          return {
-            success: true,
-            corrida: response.data.corrida || response.data,
-          };
-        }
-      } catch (error: any) {
-        lastError = error;
-
-        // Log each endpoint attempt
-        if (axios.isAxiosError(error)) {
-          const status = error.response?.status;
-          logger.warn(`Machine Global createRide - Endpoint ${endpoint} failed: HTTP ${status}`);
-
-          // If we get 401/403, credentials are wrong - don't try other endpoints
-          if (status === 401 || status === 403) {
-            logger.error(`Machine Global createRide - Authentication failed (${status}). Check credentials.`);
-            logger.error(`Machine Global createRide - Response: ${JSON.stringify(error.response?.data)}`);
-            break;
-          }
-
-          // If we get 404, try next endpoint
-          if (status === 404) {
-            continue;
-          }
-
-          // For other errors, log and try next
-          logger.warn(`Machine Global createRide - Response: ${JSON.stringify(error.response?.data)}`);
-        }
-
-        continue;
-      }
-    }
-
-    // All endpoints failed - log comprehensive error
-    if (lastError) {
-      if (axios.isAxiosError(lastError)) {
-        logger.error(`Machine Global createRide - ALL endpoints failed!`);
-        logger.error(`Machine Global createRide - Last HTTP Error: Status=${lastError.response?.status}`);
-        logger.error(`Machine Global createRide - Last Response data: ${JSON.stringify(lastError.response?.data)}`);
-        logger.error(`Machine Global createRide - Full URL attempted: ${lastError.config?.baseURL}${lastError.config?.url}`);
-        logger.error(`Machine Global createRide - Request headers: ${JSON.stringify(lastError.config?.headers)}`);
+        logger.error(`Machine Global createRide - Failed: HTTP ${status}`);
+        logger.error(`Machine Global createRide - Response: ${JSON.stringify(errorData)}`);
+        logger.error(`Machine Global createRide - Full URL: ${this.baseURL}${endpoint}`);
       } else {
-        logger.error(`Machine Global createRide - Non-HTTP Error: ${lastError.message}`);
+        logger.error(`Machine Global createRide - Error: ${error.message}`);
       }
-      return this.handleError(lastError);
+      return this.handleError(error);
     }
-
-    return { success: false, errors: ['No working endpoint found'] };
   }
 
   // Get ride status
@@ -425,10 +377,11 @@ class MachineGlobalService {
     }
   }
 
-  // Cancel a ride
+  // Cancel a ride - POST /api/integracao/cancelar
   async cancelRide(rideId: string, motivo?: string): Promise<{ success: boolean; errors?: string[] }> {
     try {
-      const response = await this.client.post(`/api/integracao/cancelarSolicitacao/${rideId}`, {
+      const response = await this.client.post('/api/integracao/cancelar', {
+        solicitacao_id: rideId,
         motivo: motivo || 'Cancelado pelo cliente',
       });
       return response.data;
