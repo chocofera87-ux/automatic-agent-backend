@@ -361,4 +361,157 @@ router.get('/test-credentials', async (req: Request, res: Response) => {
   }
 });
 
+// Debug endpoint to test Machine Global API directly
+// This endpoint helps diagnose API connection issues
+router.get('/test-machine-api', async (req: Request, res: Response) => {
+  try {
+    // Load Machine Global credentials from database
+    const machineCreds = await credentialsService.getServiceCredentials('machine');
+
+    const debugInfo: any = {
+      timestamp: new Date().toISOString(),
+      credentials: {
+        apiKey: machineCreds.MACHINE_GLOBAL_API_KEY
+          ? `SET (${machineCreds.MACHINE_GLOBAL_API_KEY.substring(0, 15)}...)`
+          : 'NOT SET',
+        username: machineCreds.MACHINE_GLOBAL_USERNAME || 'NOT SET',
+        password: machineCreds.MACHINE_GLOBAL_PASSWORD ? 'SET' : 'NOT SET',
+        baseUrl: machineCreds.MACHINE_GLOBAL_BASE_URL || 'NOT SET (will use default)',
+      },
+      tests: [],
+    };
+
+    if (!machineCreds.MACHINE_GLOBAL_API_KEY || !machineCreds.MACHINE_GLOBAL_USERNAME || !machineCreds.MACHINE_GLOBAL_PASSWORD) {
+      debugInfo.error = 'Machine Global credentials are incomplete. Please configure them in the Settings page.';
+      return res.json({ success: false, debug: debugInfo });
+    }
+
+    // Update service credentials
+    machineGlobalService.updateCredentials(
+      machineCreds.MACHINE_GLOBAL_API_KEY,
+      machineCreds.MACHINE_GLOBAL_USERNAME,
+      machineCreds.MACHINE_GLOBAL_PASSWORD,
+      machineCreds.MACHINE_GLOBAL_BASE_URL
+    );
+
+    // Test 1: Try to list webhooks (basic connectivity test)
+    try {
+      const webhookResult = await machineGlobalService.listWebhooks();
+      debugInfo.tests.push({
+        name: 'List Webhooks',
+        endpoint: '/listarWebhook',
+        success: webhookResult.success !== false,
+        response: webhookResult,
+      });
+    } catch (error: any) {
+      debugInfo.tests.push({
+        name: 'List Webhooks',
+        endpoint: '/listarWebhook',
+        success: false,
+        error: error.message,
+        status: error.response?.status,
+        responseData: error.response?.data,
+      });
+    }
+
+    // Test 2: Try to verify connection
+    try {
+      const isConnected = await machineGlobalService.verifyConnection();
+      debugInfo.tests.push({
+        name: 'Verify Connection',
+        success: isConnected,
+      });
+    } catch (error: any) {
+      debugInfo.tests.push({
+        name: 'Verify Connection',
+        success: false,
+        error: error.message,
+      });
+    }
+
+    // Overall result
+    const allTestsPassed = debugInfo.tests.every((t: any) => t.success);
+    debugInfo.overallResult = allTestsPassed ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED';
+
+    res.json({
+      success: allTestsPassed,
+      debug: debugInfo,
+      message: allTestsPassed
+        ? 'Machine Global API is working correctly'
+        : 'Machine Global API has issues - check the debug info above',
+    });
+  } catch (error: any) {
+    logger.error('Machine API test error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack,
+    });
+  }
+});
+
+// Debug endpoint to show what API documentation we need from Machine Global
+router.get('/machine-api-requirements', async (_req: Request, res: Response) => {
+  res.json({
+    title: 'Machine Global API Requirements',
+    description: 'Information needed from Machine Global (Taxi Machine) support team',
+    requiredInfo: {
+      '1_base_url': {
+        question: 'What is the correct API Base URL?',
+        note: 'Not the web panel login URL. Example: https://api.taximachine.com.br',
+        currentlyTrying: ['https://cloud.taximachine.com.br', 'https://api.taximachine.com.br'],
+      },
+      '2_endpoints': {
+        question: 'What are the official API endpoints?',
+        needed: [
+          'Create ride / dispatch request (abrirSolicitacao)',
+          'Get price estimate (cotacao/estimativa)',
+          'Cancel ride',
+          'Get ride status',
+          'Webhook registration',
+        ],
+        currentlyTrying: [
+          '/api/integracao/abrirSolicitacao',
+          '/api/integracao/estimativa',
+          '/listarWebhook',
+          '/cadastrarWebhook',
+        ],
+      },
+      '3_authentication': {
+        question: 'What is the required authentication method?',
+        options: [
+          'API Key in header (api-key: xxx)',
+          'Bearer token (Authorization: Bearer xxx)',
+          'Basic Auth (username:password)',
+          'Cookie/Session based',
+        ],
+        currentlyUsing: 'API Key header + Basic Auth combined',
+      },
+      '4_payload_format': {
+        question: 'What is the required payload format for creating a ride?',
+        needed: [
+          'Origin format (address string? lat/lng? both?)',
+          'Destination format',
+          'Passenger info (required fields)',
+          'Category options (Carro, Moto, Premium, etc.)',
+          'Payment method codes',
+          'City/region requirements',
+        ],
+        currentPayloadExample: {
+          origem: { endereco: 'Rua Example, 123', latitude: -22.123, longitude: -47.456 },
+          destino: { endereco: 'Av Example, 456', latitude: -22.789, longitude: -47.012 },
+          passageiro: { nome: 'Customer Name', telefone: '+5519999999999' },
+          categoria: 'Carro',
+          formaPagamento: 'D',
+        },
+      },
+      '5_sample_requests': {
+        question: 'Can you provide sample curl/Postman requests?',
+        for: ['Create ride', 'Get price estimate', 'Cancel ride'],
+      },
+    },
+    instructions: 'Please send this information to Machine Global support and update the credentials in the Settings page once you have the correct values.',
+  });
+});
+
 export default router;
