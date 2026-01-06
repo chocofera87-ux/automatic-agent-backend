@@ -450,6 +450,145 @@ router.get('/test-machine-api', async (req: Request, res: Response) => {
   }
 });
 
+// Debug endpoint to test Machine price quote with custom category ID
+// Use this to find the correct category ID for your Machine Global configuration
+router.post('/test-machine-price', async (req: Request, res: Response) => {
+  try {
+    const { categoria_id, origem, destino } = req.body;
+
+    // Load Machine Global credentials from database
+    const machineCreds = await credentialsService.getServiceCredentials('machine');
+
+    if (!machineCreds.MACHINE_GLOBAL_API_KEY || !machineCreds.MACHINE_GLOBAL_USERNAME || !machineCreds.MACHINE_GLOBAL_PASSWORD) {
+      return res.status(400).json({
+        success: false,
+        error: 'Machine Global credentials not configured. Please set them in Settings page.',
+      });
+    }
+
+    // Update service credentials
+    machineGlobalService.updateCredentials(
+      machineCreds.MACHINE_GLOBAL_API_KEY,
+      machineCreds.MACHINE_GLOBAL_USERNAME,
+      machineCreds.MACHINE_GLOBAL_PASSWORD,
+      machineCreds.MACHINE_GLOBAL_BASE_URL
+    );
+
+    // Default test addresses in São Paulo area
+    const testOrigem = origem || {
+      endereco: 'Rua XV de Novembro, 100, Capivari, SP',
+      latitude: -22.9969,
+      longitude: -47.5077,
+    };
+    const testDestino = destino || {
+      endereco: 'Av. Brasil, 500, Santa Bárbara d\'Oeste, SP',
+      latitude: -22.7549,
+      longitude: -47.4143,
+    };
+
+    logger.info(`Testing Machine price quote with categoria_id: ${categoria_id}`);
+
+    const result = await machineGlobalService.getPriceQuote({
+      origem: testOrigem,
+      destino: testDestino,
+      categoria_id: categoria_id,
+    });
+
+    res.json({
+      success: result.success,
+      categoria_id_tested: categoria_id,
+      result: result,
+      testData: {
+        origem: testOrigem,
+        destino: testDestino,
+      },
+      hint: result.success
+        ? `Category ID ${categoria_id} works! Update CATEGORY_CONFIG in conversation.service.ts`
+        : 'Try different category IDs (1, 2, 3, etc.) to find the valid ones',
+    });
+  } catch (error: any) {
+    logger.error('Machine price test error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      hint: 'Check Railway logs for full request/response details',
+    });
+  }
+});
+
+// Debug endpoint to test creating a ride with custom category ID
+router.post('/test-machine-ride', async (req: Request, res: Response) => {
+  try {
+    const { categoria_id, origem, destino, passageiro } = req.body;
+
+    // Load Machine Global credentials from database
+    const machineCreds = await credentialsService.getServiceCredentials('machine');
+
+    if (!machineCreds.MACHINE_GLOBAL_API_KEY || !machineCreds.MACHINE_GLOBAL_USERNAME || !machineCreds.MACHINE_GLOBAL_PASSWORD) {
+      return res.status(400).json({
+        success: false,
+        error: 'Machine Global credentials not configured. Please set them in Settings page.',
+      });
+    }
+
+    // Update service credentials
+    machineGlobalService.updateCredentials(
+      machineCreds.MACHINE_GLOBAL_API_KEY,
+      machineCreds.MACHINE_GLOBAL_USERNAME,
+      machineCreds.MACHINE_GLOBAL_PASSWORD,
+      machineCreds.MACHINE_GLOBAL_BASE_URL
+    );
+
+    // Default test data
+    const testOrigem = origem || {
+      endereco: 'Rua XV de Novembro, 100, Capivari, SP',
+      latitude: -22.9969,
+      longitude: -47.5077,
+    };
+    const testDestino = destino || {
+      endereco: 'Av. Brasil, 500, Santa Bárbara d\'Oeste, SP',
+      latitude: -22.7549,
+      longitude: -47.4143,
+    };
+    const testPassageiro = passageiro || {
+      nome: 'Teste API',
+      telefone: '+5519999999999',
+    };
+
+    logger.info(`Testing Machine ride creation with categoria_id: ${categoria_id}`);
+
+    const result = await machineGlobalService.createRide({
+      origem: testOrigem,
+      destino: testDestino,
+      passageiro: testPassageiro,
+      categoria_id: categoria_id,
+      formaPagamento: 'D', // Cash
+      observacoes: 'TESTE - CANCELAR IMEDIATAMENTE',
+    });
+
+    res.json({
+      success: result.success,
+      categoria_id_tested: categoria_id,
+      result: result,
+      testData: {
+        origem: testOrigem,
+        destino: testDestino,
+        passageiro: testPassageiro,
+      },
+      warning: result.success
+        ? 'IMPORTANT: This created a real ride request! Cancel it immediately via Machine dashboard!'
+        : 'Ride creation failed - check the error',
+    });
+  } catch (error: any) {
+    logger.error('Machine ride test error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      hint: 'Check Railway logs for full request/response details',
+    });
+  }
+});
+
 // Debug endpoint to show what API documentation we need from Machine Global
 router.get('/machine-api-requirements', async (_req: Request, res: Response) => {
   res.json({
