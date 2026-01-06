@@ -224,7 +224,7 @@ class CredentialsService {
       const apiKey = await this.getCredential('MACHINE_GLOBAL_API_KEY');
       const username = await this.getCredential('MACHINE_GLOBAL_USERNAME');
       const password = await this.getCredential('MACHINE_GLOBAL_PASSWORD');
-      let baseUrl = await this.getCredential('MACHINE_GLOBAL_BASE_URL') || 'https://cloud.taximachine.com.br';
+      let baseUrl = await this.getCredential('MACHINE_GLOBAL_BASE_URL') || 'https://api-trial.taximachine.com.br';
 
       // Sanitize base URL - remove any path (e.g., /site/login)
       const urlMatch = baseUrl.match(/^(https?:\/\/[^\/]+)/);

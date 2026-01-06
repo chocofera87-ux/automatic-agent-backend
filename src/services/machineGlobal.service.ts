@@ -115,8 +115,8 @@ class MachineGlobalService {
     this.apiKey = process.env.MACHINE_GLOBAL_API_KEY || '';
     this.username = process.env.MACHINE_GLOBAL_USERNAME || '';
     this.password = process.env.MACHINE_GLOBAL_PASSWORD || '';
-    // Default to cloud.taximachine.com.br - the main Machine Global API endpoint
-    this.baseURL = process.env.MACHINE_GLOBAL_BASE_URL || 'https://cloud.taximachine.com.br';
+    // Official Machine Global API URL (not the web panel cloud.taximachine.com.br)
+    this.baseURL = process.env.MACHINE_GLOBAL_BASE_URL || 'https://api-trial.taximachine.com.br';
 
     this.client = this.createClient();
   }

@@ -41,7 +41,7 @@ async function loadAllCredentials(): Promise<void> {
       logger.info(`  - API Key: ${machineCreds.MACHINE_GLOBAL_API_KEY.substring(0, 15)}...`);
       logger.info(`  - Username: ${machineCreds.MACHINE_GLOBAL_USERNAME}`);
       logger.info(`  - Password: SET (${machineCreds.MACHINE_GLOBAL_PASSWORD.length} chars)`);
-      logger.info(`  - Base URL: ${machineCreds.MACHINE_GLOBAL_BASE_URL || 'DEFAULT (api.taximachine.com.br)'}`);
+      logger.info(`  - Base URL: ${machineCreds.MACHINE_GLOBAL_BASE_URL || 'DEFAULT (api-trial.taximachine.com.br)'}`);
       machineGlobalService.updateCredentials(
         machineCreds.MACHINE_GLOBAL_API_KEY,
         machineCreds.MACHINE_GLOBAL_USERNAME,
