@@ -310,9 +310,28 @@ class MachineGlobalService {
       logger.error(`========== MACHINE PRICE QUOTE ERROR ==========`);
       logger.error(`[MACHINE] POST ${fullUrl} FAILED`);
 
+      let errorMessage = error.message;
+
       if (axios.isAxiosError(error)) {
-        logger.error(`[MACHINE] Status: ${error.response?.status}`);
+        const status = error.response?.status;
+        const headers = error.response?.headers;
+        logger.error(`[MACHINE] Status: ${status}`);
+        logger.error(`[MACHINE] Headers: ${JSON.stringify(headers)}`);
         logger.error(`[MACHINE] Error: ${JSON.stringify(error.response?.data)}`);
+
+        // Provide descriptive error messages based on status code
+        if (status === 403) {
+          const ratedBy = headers?.['mch-rated-by'];
+          if (ratedBy) {
+            errorMessage = `API Access Denied (403): API key may be rate-limited or invalid. Header: ${ratedBy}. Please check your Machine Global credentials.`;
+          } else {
+            errorMessage = 'API Access Denied (403): Invalid credentials or API key. Please verify your Machine Global API key, username, and password in Settings.';
+          }
+        } else if (status === 401) {
+          errorMessage = 'Authentication Failed (401): Invalid username or password. Please verify your Machine Global credentials.';
+        } else if (status === 404) {
+          errorMessage = 'Endpoint Not Found (404): The API endpoint may have changed. Please contact Machine Global support.';
+        }
       } else {
         logger.error(`[MACHINE] Error: ${error.message}`);
       }
@@ -320,7 +339,7 @@ class MachineGlobalService {
 
       return {
         success: false,
-        errors: [error.response?.data?.error?.message || error.message],
+        errors: [errorMessage],
       };
     }
   }
@@ -480,14 +499,34 @@ class MachineGlobalService {
     }
   }
 
-  // Handle errors uniformly
+  // Handle errors uniformly with descriptive messages
   private handleError(error: unknown): { success: false; errors: string[] } {
     if (axios.isAxiosError(error)) {
       const axiosError = error as AxiosError<{ errors?: string[]; message?: string }>;
-      const errors = axiosError.response?.data?.errors || [
-        axiosError.response?.data?.message || axiosError.message,
-      ];
-      return { success: false, errors };
+      const status = axiosError.response?.status;
+      const headers = axiosError.response?.headers;
+
+      // Provide descriptive error messages based on status code
+      let errorMessage: string;
+      if (status === 403) {
+        const ratedBy = headers?.['mch-rated-by'];
+        if (ratedBy) {
+          errorMessage = `API Access Denied (403): API key may be rate-limited or invalid. Header: ${ratedBy}. Please check your Machine Global credentials.`;
+        } else {
+          errorMessage = 'API Access Denied (403): Invalid credentials or API key. Please verify your Machine Global API key, username, and password in Settings.';
+        }
+      } else if (status === 401) {
+        errorMessage = 'Authentication Failed (401): Invalid username or password. Please verify your Machine Global credentials.';
+      } else if (status === 404) {
+        errorMessage = 'Endpoint Not Found (404): The API endpoint may have changed. Please contact Machine Global support.';
+      } else {
+        const errors = axiosError.response?.data?.errors || [
+          axiosError.response?.data?.message || axiosError.message,
+        ];
+        return { success: false, errors };
+      }
+
+      return { success: false, errors: [errorMessage] };
     }
     return { success: false, errors: [(error as Error).message] };
   }
