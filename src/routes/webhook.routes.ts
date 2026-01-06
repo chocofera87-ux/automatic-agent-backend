@@ -102,30 +102,39 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
     // Acknowledge receipt immediately (Meta requires 200 within 20 seconds)
     res.status(200).send('OK');
 
+    // Log raw payload for debugging - temporarily at info level for troubleshooting
+    logger.info(`WhatsApp webhook raw payload: ${JSON.stringify(payload).substring(0, 500)}`);
+
     // Load all credentials from database before processing (WhatsApp, OpenAI, Machine Global)
     await loadAllCredentials();
-
-    logger.info('WhatsApp webhook received - processing messages');
 
     // Parse the webhook payload
     const { messages, statuses } = whatsappService.parseWebhookPayload(payload);
 
+    // Log what we received
+    logger.info(`WhatsApp webhook received - ${messages.length} messages, ${statuses.length} statuses`);
+
     // Process messages
     for (const msg of messages) {
-      logger.info(`Incoming WhatsApp message from ${msg.from}: ${msg.type}`);
+      logger.info(`Incoming WhatsApp message from ${msg.from}: ${msg.type} - "${typeof msg.content === 'string' ? msg.content.substring(0, 50) : JSON.stringify(msg.content)}"`);
 
-      await conversationService.processMessage(
-        msg.from,
-        msg.messageId,
-        msg.type as 'text' | 'audio' | 'location' | 'interactive',
-        msg.content,
-        msg.name
-      );
+      try {
+        await conversationService.processMessage(
+          msg.from,
+          msg.messageId,
+          msg.type as 'text' | 'audio' | 'location' | 'interactive',
+          msg.content,
+          msg.name
+        );
+        logger.info(`Message from ${msg.from} processed successfully`);
+      } catch (msgError: any) {
+        logger.error(`Error processing message from ${msg.from}:`, msgError);
+      }
     }
 
-    // Log status updates
+    // Log status updates (at info level for debugging)
     for (const status of statuses) {
-      logger.debug(`Message ${status.messageId} status: ${status.status}`);
+      logger.info(`Message ${status.messageId} status: ${status.status} (to: ${status.recipientId})`);
     }
   } catch (error: any) {
     logger.error('Error processing WhatsApp webhook:', error);

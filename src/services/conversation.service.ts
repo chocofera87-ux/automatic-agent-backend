@@ -248,8 +248,11 @@ class ConversationService {
           };
           break;
         case 'interactive':
-          textContent = content.buttonTitle || content.listTitle || '';
+          // For interactive messages, use the button/list ID as textContent for handler matching
+          // Fall back to title if ID is not available
+          textContent = content.buttonId || content.listId || content.buttonTitle || content.listTitle || '';
           metadata = content;
+          logger.info(`[Interactive] Button clicked - ID: ${content.buttonId}, Title: ${content.buttonTitle}`);
           break;
       }
 
@@ -310,40 +313,49 @@ class ConversationService {
 
     switch (conversation.state) {
       case ConversationState.GREETING:
+        logger.info(`[ConversationFlow] Invoking handleGreeting`);
         await this.handleGreeting(conversation, message, intent, context);
         break;
 
       case ConversationState.REQUESTING_LOCATION:
+        logger.info(`[ConversationFlow] Invoking handleLocationRequest`);
         await this.handleLocationRequest(conversation, message, messageType, metadata, intent, context);
         break;
 
       case ConversationState.AWAITING_ORIGIN:
+        logger.info(`[ConversationFlow] Invoking handleOriginInput`);
         await this.handleOriginInput(conversation, message, messageType, metadata, intent, context);
         break;
 
       case ConversationState.CONFIRMING_ORIGIN:
+        logger.info(`[ConversationFlow] Invoking handleOriginConfirmation`);
         await this.handleOriginConfirmation(conversation, message, messageType, metadata, intent, context);
         break;
 
       case ConversationState.AWAITING_DESTINATION:
+        logger.info(`[ConversationFlow] Invoking handleDestinationInput`);
         await this.handleDestinationInput(conversation, message, messageType, metadata, intent, context);
         break;
 
       case ConversationState.AWAITING_CATEGORY:
+        logger.info(`[ConversationFlow] Invoking handleCategorySelection with message: "${message}"`);
         await this.handleCategorySelection(conversation, message, intent, context);
         break;
 
       case ConversationState.SHOWING_PRICE:
       case ConversationState.AWAITING_CONFIRMATION:
+        logger.info(`[ConversationFlow] Invoking handleConfirmation with message: "${message}"`);
         await this.handleConfirmation(conversation, message, intent, context);
         break;
 
       case ConversationState.RIDE_CREATED:
       case ConversationState.RIDE_IN_PROGRESS:
+        logger.info(`[ConversationFlow] Invoking handleActiveRide`);
         await this.handleActiveRide(conversation, message, intent, context);
         break;
 
       default:
+        logger.info(`[ConversationFlow] Unknown state, invoking handleGreeting`);
         // Reset to greeting for unknown states
         await this.handleGreeting(conversation, message, intent, context);
     }
@@ -646,12 +658,18 @@ class ConversationService {
     const lowerMessage = message.toLowerCase();
     let category: VehicleCategory = VehicleCategory.CARRO_PEQUENO;
 
+    logger.info(`[CategorySelection] Received message: "${message}", lowerMessage: "${lowerMessage}"`);
+
     if (lowerMessage.includes('grande') || lowerMessage.includes('confort') ||
         message === 'cat_grande' || message === 'cat_confort') {
       category = VehicleCategory.CARRO_GRANDE;
+      logger.info(`[CategorySelection] Selected CARRO_GRANDE`);
     } else if (lowerMessage.includes('pequeno') || lowerMessage.includes('lite') ||
                message === 'cat_pequeno' || message === 'cat_lite') {
       category = VehicleCategory.CARRO_PEQUENO;
+      logger.info(`[CategorySelection] Selected CARRO_PEQUENO`);
+    } else {
+      logger.info(`[CategorySelection] No match, defaulting to CARRO_PEQUENO`);
     }
 
     context.category = category;
