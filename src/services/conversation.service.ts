@@ -694,13 +694,20 @@ class ConversationService {
       logger.info(`[CategorySelection] Machine price: R$${estimatedPrice}, Distance: ${distanceKm}km, Duration: ${durationMin}min`);
     } else {
       // Machine API failed - show error to user
-      logger.error(`[CategorySelection] Machine quote failed: ${JSON.stringify(quote.errors)}`);
+      const errorDetails = quote.errors?.join(', ') || 'Erro desconhecido';
+      logger.error(`[CategorySelection] Machine quote failed: ${errorDetails}`);
 
-      const errorMsg = await whatsappService.sendTextMessage(
-        phoneNumber,
-        'Não foi possível calcular o valor da corrida. Por favor, tente novamente.'
-      );
-      await this.saveOutgoingMessage(conversation.id, 'Erro ao obter cotação', errorMsg.messageId);
+      // Check if it's a credentials/auth error (403/401)
+      const isAuthError = errorDetails.includes('403') || errorDetails.includes('401') || errorDetails.includes('Access Denied');
+
+      let userMessage = 'Não foi possível calcular o valor da corrida. Por favor, tente novamente.';
+      if (isAuthError) {
+        userMessage = 'Sistema temporariamente indisponível. Por favor, tente novamente em alguns minutos.';
+        logger.error(`[CategorySelection] CREDENTIAL ERROR - Machine API returned auth failure. Admin should check Settings page.`);
+      }
+
+      const errorMsg = await whatsappService.sendTextMessage(phoneNumber, userMessage);
+      await this.saveOutgoingMessage(conversation.id, `Erro: ${errorDetails.substring(0, 50)}`, errorMsg.messageId);
 
       // Show category selection again
       await this.showCategorySelection(conversation, context);
