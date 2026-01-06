@@ -20,12 +20,18 @@ async function loadAllCredentials(): Promise<void> {
         whatsappCreds.WHATSAPP_PHONE_NUMBER_ID,
         whatsappCreds.WHATSAPP_VERIFY_TOKEN
       );
+    } else {
+      logger.warn('WhatsApp credentials not found in database - check Settings page');
+      logger.warn(`  - Access Token: ${whatsappCreds.WHATSAPP_ACCESS_TOKEN ? 'SET' : 'NOT SET'}`);
+      logger.warn(`  - Phone Number ID: ${whatsappCreds.WHATSAPP_PHONE_NUMBER_ID ? 'SET' : 'NOT SET'}`);
     }
 
     // Load OpenAI credentials
     const openaiCreds = await credentialsService.getServiceCredentials('openai');
     if (openaiCreds.OPENAI_API_KEY) {
       openaiService.updateCredentials(openaiCreds.OPENAI_API_KEY);
+    } else {
+      logger.warn('OpenAI credentials not found in database');
     }
 
     // Load Machine Global credentials
@@ -37,6 +43,8 @@ async function loadAllCredentials(): Promise<void> {
         machineCreds.MACHINE_GLOBAL_PASSWORD,
         machineCreds.MACHINE_GLOBAL_BASE_URL
       );
+    } else {
+      logger.warn('Machine Global credentials incomplete in database');
     }
   } catch (error) {
     logger.error('Failed to load credentials from database:', error);

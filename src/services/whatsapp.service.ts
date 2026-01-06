@@ -192,7 +192,9 @@ class WhatsAppService {
     // Use provided verifyToken or keep default
     this.verifyToken = verifyToken || DEFAULT_VERIFY_TOKEN;
     this.client = this.createClient();
-    logger.info('WhatsApp credentials updated');
+    logger.info(`WhatsApp credentials updated from database:`);
+    logger.info(`  - Phone Number ID: ${this.phoneNumberId}`);
+    logger.info(`  - Access Token: ${this.accessToken ? `SET (${this.accessToken.length} chars)` : 'NOT SET'}`);
   }
 
   // Check if credentials are configured
