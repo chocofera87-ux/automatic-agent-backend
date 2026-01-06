@@ -91,60 +91,45 @@ async function reverseGeocode(latitude: number, longitude: number): Promise<stri
   }
 }
 
-// Pricing rules - single source of truth
-// IMPORTANT: This is the ONLY place where pricing is defined
-// Never use Machine Global pricing - always use these rules
-interface PricingRule {
-  baseFare: number;       // Base fare in R$
-  pricePerKm: number;     // Price per kilometer in R$
-  pricePerMinute: number; // Price per minute in R$
-  minimumFare: number;    // Minimum fare in R$
+// Category configuration with Machine API category IDs
+// IMPORTANT: categoria_id must match EXACTLY what is configured in Machine system
+// These IDs should be obtained from Machine support or dashboard
+interface CategoryConfig {
+  categoria_id: number;   // Machine API numeric category ID
   displayName: string;    // User-friendly name for WhatsApp display
   description: string;    // Description for user understanding
+  buttonId: string;       // WhatsApp button ID
 }
 
-const PRICING_RULES: Record<string, PricingRule> = {
+// Machine category IDs - MUST match Machine system configuration
+// TODO: Get exact IDs from Machine support/dashboard
+const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
   CARRO_PEQUENO: {
-    baseFare: 5.00,
-    pricePerKm: 2.00,
-    pricePerMinute: 0.35,
-    minimumFare: 9.00,
+    categoria_id: 1,      // Machine category ID for standard car
     displayName: 'Carro Pequeno',
     description: 'Econômico',
+    buttonId: 'cat_pequeno',
   },
   CARRO_GRANDE: {
-    baseFare: 7.00,
-    pricePerKm: 2.00,
-    pricePerMinute: 0.55,
-    minimumFare: 9.00,
+    categoria_id: 2,      // Machine category ID for larger/premium car
     displayName: 'Carro Grande',
     description: 'Conforto / Família',
+    buttonId: 'cat_grande',
   },
 };
 
-// Calculate ride price based on category, distance, and duration
-// Formula: final_price = base_fare + (distance_km × price_per_km) + (duration_minutes × price_per_minute)
-// Then apply minimum fare if calculated price is below it
-function calculatePrice(category: VehicleCategory, distanceKm: number, durationMinutes: number): number {
-  const rules = PRICING_RULES[category as string] || PRICING_RULES.CARRO_PEQUENO;
-
-  const calculatedPrice = rules.baseFare +
-    (distanceKm * rules.pricePerKm) +
-    (durationMinutes * rules.pricePerMinute);
-
-  // Apply minimum fare if calculated price is below it
-  return Math.max(calculatedPrice, rules.minimumFare);
+// Get Machine category ID from our VehicleCategory enum
+function getMachineCategoryId(category?: VehicleCategory): number {
+  if (!category) return CATEGORY_CONFIG.CARRO_PEQUENO.categoria_id;
+  const config = CATEGORY_CONFIG[category as string];
+  return config?.categoria_id || CATEGORY_CONFIG.CARRO_PEQUENO.categoria_id;
 }
 
-// Map VehicleCategory enum to Machine Global API format
-function mapCategoryToApi(category?: VehicleCategory): 'Carro' | 'Moto' | 'Premium' | 'Corporativo' {
-  if (!category) return 'Carro';
-  // Map our categories to Machine Global's categories
-  const map: Record<VehicleCategory, 'Carro' | 'Moto' | 'Premium' | 'Corporativo'> = {
-    [VehicleCategory.CARRO_PEQUENO]: 'Carro',
-    [VehicleCategory.CARRO_GRANDE]: 'Premium',
-  };
-  return map[category] || 'Carro';
+// Get category display name
+function getCategoryDisplayName(category?: VehicleCategory): string {
+  if (!category) return CATEGORY_CONFIG.CARRO_PEQUENO.displayName;
+  const config = CATEGORY_CONFIG[category as string];
+  return config?.displayName || CATEGORY_CONFIG.CARRO_PEQUENO.displayName;
 }
 
 class ConversationService {
@@ -674,8 +659,11 @@ class ConversationService {
 
     context.category = category;
 
-    // Get distance/duration estimate from Machine Global (ONLY for distance/duration, NOT price)
-    // We NEVER use Machine Global pricing - only our own pricing rules
+    // Get Machine category ID for API calls
+    const machineCategoryId = getMachineCategoryId(category);
+    logger.info(`[CategorySelection] Machine Category ID: ${machineCategoryId}`);
+
+    // Get price estimate from Machine API - THIS IS THE SOURCE OF TRUTH FOR PRICING
     const quote = await machineGlobalService.getPriceQuote({
       origem: {
         endereco: context.origin?.address || '',
@@ -687,50 +675,51 @@ class ConversationService {
         latitude: context.destination?.latitude,
         longitude: context.destination?.longitude,
       },
-      categoria: mapCategoryToApi(category),
+      categoria_id: machineCategoryId,
     });
 
-    // Get distance and duration for price calculation
-    // Use reasonable defaults if Machine Global fails
-    let distanceKm = 3.0;  // Default fallback for short city rides
-    let durationMin = 8;   // Default fallback (~8 min for 3km)
+    logger.info(`[CategorySelection] Machine quote response: ${JSON.stringify(quote)}`);
 
-    if (quote.success && quote.cotacao) {
-      // Only use distance/duration from Machine Global, NEVER use their price
-      distanceKm = quote.cotacao.distanciaKm || 3.0;
-      durationMin = quote.cotacao.tempoEstimado || 8;
+    // Get price from Machine API
+    let estimatedPrice = 0;
+    let distanceKm = 0;
+    let durationMin = 0;
 
-      logger.info(`Machine Global quote: ${distanceKm}km, ${durationMin}min (their price ignored: R$${quote.cotacao.valorEstimado})`);
+    if (quote.success) {
+      // Use Machine API price as the source of truth
+      estimatedPrice = quote.valor_estimado || quote.cotacao?.valorEstimado || 0;
+      distanceKm = quote.distancia_km || quote.cotacao?.distanciaKm || 0;
+      durationMin = quote.tempo_estimado || quote.cotacao?.tempoEstimado || 0;
+
+      logger.info(`[CategorySelection] Machine price: R$${estimatedPrice}, Distance: ${distanceKm}km, Duration: ${durationMin}min`);
     } else {
-      logger.warn('Machine Global quote failed, using default distance/duration');
+      // Machine API failed - show error to user
+      logger.error(`[CategorySelection] Machine quote failed: ${JSON.stringify(quote.errors)}`);
+
+      const errorMsg = await whatsappService.sendTextMessage(
+        phoneNumber,
+        'Não foi possível calcular o valor da corrida. Por favor, tente novamente.'
+      );
+      await this.saveOutgoingMessage(conversation.id, 'Erro ao obter cotação', errorMsg.messageId);
+
+      // Show category selection again
+      await this.showCategorySelection(conversation, context);
+      return;
     }
 
-    // Store internally (will only show after driver accepts)
+    // Store in context
+    context.estimatedPrice = estimatedPrice;
     context.estimatedDistance = distanceKm;
     context.estimatedDuration = durationMin;
 
-    // Calculate price using OUR pricing formula (single source of truth)
-    // Formula: base_fare + (distance_km × price_per_km) + (duration_minutes × price_per_minute)
-    context.estimatedPrice = calculatePrice(category, distanceKm, durationMin);
-
-    // Log price calculation for debugging
-    const rules = PRICING_RULES[category as string];
-    logger.info(`Price calculation: ${rules.baseFare} + (${distanceKm} × ${rules.pricePerKm}) + (${durationMin} × ${rules.pricePerMinute}) = R$${context.estimatedPrice.toFixed(2)}`);
-
-    // PRICING VALIDATION: Ensure price is reasonable before showing to user
-    if (context.estimatedPrice < rules.minimumFare) {
-      context.estimatedPrice = rules.minimumFare;
-      logger.info(`Price below minimum, using minimum fare: R$${rules.minimumFare}`);
-    }
-
-    // Update state to showing price - FINAL CONFIRMATION BEFORE RIDE CREATION
+    // Update state to awaiting confirmation
     await this.updateConversation(conversation.id, ConversationState.AWAITING_CONFIRMATION, context);
 
-    // Get user-friendly category name from pricing rules
-    const categoryDisplayName = PRICING_RULES[category as string]?.displayName || 'Carro Pequeno';
+    // Get user-friendly category name
+    const categoryDisplayName = getCategoryDisplayName(category);
 
-    // UX RULE: Before acceptance, show ONLY price (no km, no ETA)
-    const summaryMessage = `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n\n🚗 ${categoryDisplayName}\n💰 R$ ${context.estimatedPrice.toFixed(2)}`;
+    // Show price from Machine API
+    const summaryMessage = `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n\n🚗 ${categoryDisplayName}\n💰 R$ ${estimatedPrice.toFixed(2)}`;
 
     const response = await whatsappService.sendButtonMessage(
       phoneNumber,
@@ -797,7 +786,7 @@ class ConversationService {
     }
 
     // User sent something else - show options again (only price, no km/ETA)
-    const categoryDisplayName = PRICING_RULES[context.category as string]?.displayName || 'Carro Pequeno';
+    const categoryDisplayName = getCategoryDisplayName(context.category);
     const response = await whatsappService.sendButtonMessage(
       phoneNumber,
       `📍 ${context.origin?.address}\n🎯 ${context.destination?.address}\n\n🚗 ${categoryDisplayName}\n💰 R$ ${context.estimatedPrice?.toFixed(2) || '0.00'}`,
@@ -884,7 +873,7 @@ class ConversationService {
           nome: conversation.customer.name || 'Cliente WhatsApp',
           telefone: phoneNumber,
         },
-        categoria: mapCategoryToApi(context.category),
+        categoria_id: getMachineCategoryId(context.category),
         formaPagamento: 'D', // Default to cash
       });
 
@@ -924,7 +913,7 @@ class ConversationService {
       if (rideResult.success) {
         await this.updateConversation(conversation.id, ConversationState.RIDE_CREATED, context);
 
-        const categoryDisplayName = PRICING_RULES[context.category as string]?.displayName || 'Carro Pequeno';
+        const categoryDisplayName = getCategoryDisplayName(context.category);
         const confirmMsg = await whatsappService.sendTextMessage(
           phoneNumber,
           `Corrida confirmada!\n\n🚗 ${categoryDisplayName}\n💰 R$ ${context.estimatedPrice.toFixed(2)}\n\nEstamos procurando um motorista para você.\n\nCódigo: ${ride.id.slice(0, 8).toUpperCase()}`

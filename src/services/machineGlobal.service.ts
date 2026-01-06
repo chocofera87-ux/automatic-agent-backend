@@ -18,7 +18,8 @@ export interface CreateRideRequest {
   origem: MachineLocation;
   destino: MachineLocation;
   passageiro: MachinePassenger;
-  categoria?: 'Carro' | 'Moto' | 'Premium' | 'Corporativo';
+  categoria_id?: number;  // Machine category ID (numeric)
+  categoria?: string;     // Category name fallback
   formaPagamento?: string; // D, B, C, X, P, H, A, F, I, R
   observacoes?: string;
 }
@@ -26,6 +27,7 @@ export interface CreateRideRequest {
 export interface PriceQuoteRequest {
   origem: MachineLocation;
   destino: MachineLocation;
+  categoria_id?: number;  // Machine category ID
   categoria?: string;
 }
 
@@ -37,6 +39,10 @@ export interface PriceQuoteResponse {
     tempoEstimado: number;
     categoria: string;
   };
+  // Machine API may return estimate in different format
+  valor_estimado?: number;
+  distancia_km?: number;
+  tempo_estimado?: number;
   errors?: string[];
 }
 
@@ -259,46 +265,74 @@ class MachineGlobalService {
     }
   }
 
-  // Get price quote / estimation
+  // Get price quote / estimation from Machine API
+  // This should be used to get the REAL price from Machine, not calculated locally
   async getPriceQuote(data: PriceQuoteRequest): Promise<PriceQuoteResponse> {
-    try {
-      // Try different possible endpoints
-      const endpoints = [
-        '/api/integracao/estimativa',
-        '/api/integracao/cotacao',
-        '/estimativa',
-        '/cotacao',
-      ];
+    const endpoint = '/api/integracao/estimativa';
+    const fullUrl = `${this.baseURL}${endpoint}`;
 
-      for (const endpoint of endpoints) {
-        try {
-          const response = await this.client.post(endpoint, {
-            origem: data.origem,
-            destino: data.destino,
-            categoria: data.categoria || 'Carro',
-          });
-          if (response.data.success !== false) {
-            return response.data;
-          }
-        } catch (e) {
-          // Continue to next endpoint
-          continue;
-        }
+    const requestPayload: Record<string, any> = {
+      origem: data.origem,
+      destino: data.destino,
+    };
+
+    // Use categoria_id if provided
+    if (data.categoria_id) {
+      requestPayload.categoria_id = data.categoria_id;
+    } else if (data.categoria) {
+      requestPayload.categoria = data.categoria;
+    }
+
+    logger.info(`========== MACHINE PRICE QUOTE REQUEST ==========`);
+    logger.info(`[MACHINE] POST ${fullUrl}`);
+    logger.info(`[MACHINE] Request Body: ${JSON.stringify(requestPayload, null, 2)}`);
+    logger.info(`=================================================`);
+
+    try {
+      const response = await this.client.post(endpoint, requestPayload);
+
+      logger.info(`========== MACHINE PRICE QUOTE RESPONSE ==========`);
+      logger.info(`[MACHINE] Status: ${response.status}`);
+      logger.info(`[MACHINE] Response: ${JSON.stringify(response.data, null, 2)}`);
+      logger.info(`==================================================`);
+
+      // Normalize response format
+      const result: PriceQuoteResponse = {
+        success: response.data.success !== false,
+        cotacao: response.data.cotacao,
+        valor_estimado: response.data.valor_estimado || response.data.cotacao?.valorEstimado,
+        distancia_km: response.data.distancia_km || response.data.cotacao?.distanciaKm,
+        tempo_estimado: response.data.tempo_estimado || response.data.cotacao?.tempoEstimado,
+      };
+
+      return result;
+    } catch (error: any) {
+      logger.error(`========== MACHINE PRICE QUOTE ERROR ==========`);
+      logger.error(`[MACHINE] POST ${fullUrl} FAILED`);
+
+      if (axios.isAxiosError(error)) {
+        logger.error(`[MACHINE] Status: ${error.response?.status}`);
+        logger.error(`[MACHINE] Error: ${JSON.stringify(error.response?.data)}`);
+      } else {
+        logger.error(`[MACHINE] Error: ${error.message}`);
       }
+      logger.error(`================================================`);
 
       return {
         success: false,
-        errors: ['Price quote endpoint not found'],
+        errors: [error.response?.data?.error?.message || error.message],
       };
-    } catch (error) {
-      return this.handleError(error);
     }
   }
 
   // Create a new ride using official Machine Global API
   // Endpoint: POST /api/integracao/abrirSolicitacao
   async createRide(data: CreateRideRequest): Promise<RideResponse> {
-    const requestPayload = {
+    const endpoint = '/api/integracao/abrirSolicitacao';
+    const fullUrl = `${this.baseURL}${endpoint}`;
+
+    // Build request payload - use categoria_id if provided (Machine requires numeric IDs)
+    const requestPayload: Record<string, any> = {
       origem: {
         endereco: data.origem.endereco,
         latitude: data.origem.latitude,
@@ -314,38 +348,58 @@ class MachineGlobalService {
         telefone: data.passageiro.telefone,
         documento: data.passageiro.documento,
       },
-      categoria: data.categoria || 'Carro',
       formaPagamento: data.formaPagamento || PAYMENT_METHODS.DINHEIRO,
       observacoes: data.observacoes,
     };
 
-    const endpoint = '/api/integracao/abrirSolicitacao';
+    // IMPORTANT: Use categoria_id (numeric) if provided, otherwise fall back to categoria (string)
+    if (data.categoria_id) {
+      requestPayload.categoria_id = data.categoria_id;
+    } else if (data.categoria) {
+      requestPayload.categoria = data.categoria;
+    }
 
-    logger.info(`Machine Global createRide - URL: ${this.baseURL}${endpoint}`);
-    logger.info(`Machine Global createRide - API Key: ${this.apiKey ? `SET (${this.apiKey.substring(0, 10)}...)` : 'NOT SET'}`);
-    logger.info(`Machine Global createRide - Username: ${this.username || 'NOT SET'}`);
-    logger.info(`Machine Global createRide - Payload: ${JSON.stringify(requestPayload)}`);
+    // === FULL REQUEST LOG ===
+    logger.info(`========== MACHINE API REQUEST ==========`);
+    logger.info(`[MACHINE] POST ${fullUrl}`);
+    logger.info(`[MACHINE] Headers: { "api-key": "${this.apiKey ? this.apiKey.substring(0, 15) + '...' : 'NOT SET'}", "Authorization": "Basic ***" }`);
+    logger.info(`[MACHINE] Auth: { username: "${this.username}", password: "***" }`);
+    logger.info(`[MACHINE] Request Body: ${JSON.stringify(requestPayload, null, 2)}`);
+    logger.info(`=========================================`);
 
     try {
       const response = await this.client.post(endpoint, requestPayload);
 
-      logger.info(`Machine Global createRide - Success! Response: ${JSON.stringify(response.data)}`);
+      // === FULL RESPONSE LOG ===
+      logger.info(`========== MACHINE API RESPONSE ==========`);
+      logger.info(`[MACHINE] Status: ${response.status} ${response.statusText}`);
+      logger.info(`[MACHINE] Response Body: ${JSON.stringify(response.data, null, 2)}`);
+      logger.info(`[MACHINE] Ride ID (id_mch): ${response.data?.id || response.data?.corrida?.id || response.data?.solicitacao_id || 'NOT FOUND'}`);
+      logger.info(`==========================================`);
 
       return {
         success: true,
         corrida: response.data.corrida || response.data,
       };
     } catch (error: any) {
+      // === FULL ERROR LOG ===
+      logger.error(`========== MACHINE API ERROR ==========`);
+      logger.error(`[MACHINE] POST ${fullUrl} FAILED`);
+
       if (axios.isAxiosError(error)) {
         const status = error.response?.status;
+        const statusText = error.response?.statusText;
         const errorData = error.response?.data;
 
-        logger.error(`Machine Global createRide - Failed: HTTP ${status}`);
-        logger.error(`Machine Global createRide - Response: ${JSON.stringify(errorData)}`);
-        logger.error(`Machine Global createRide - Full URL: ${this.baseURL}${endpoint}`);
+        logger.error(`[MACHINE] Status: ${status} ${statusText}`);
+        logger.error(`[MACHINE] Error Response: ${JSON.stringify(errorData, null, 2)}`);
+        logger.error(`[MACHINE] Request that failed: ${JSON.stringify(requestPayload, null, 2)}`);
       } else {
-        logger.error(`Machine Global createRide - Error: ${error.message}`);
+        logger.error(`[MACHINE] Non-HTTP Error: ${error.message}`);
+        logger.error(`[MACHINE] Stack: ${error.stack}`);
       }
+      logger.error(`========================================`);
+
       return this.handleError(error);
     }
   }
