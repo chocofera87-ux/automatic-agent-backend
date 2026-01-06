@@ -232,16 +232,32 @@ class CredentialsService {
         baseUrl = urlMatch[1];
       }
 
+      // Force correct API URL if wrong one is stored
+      if (baseUrl.includes('cloud.taximachine.com.br')) {
+        baseUrl = 'https://api-trial.taximachine.com.br';
+        logger.warn(`Machine Global: Corrected base URL from cloud.taximachine to api-trial.taximachine`);
+      }
+
+      logger.info(`Machine Global Test - Using Base URL: ${baseUrl}`);
+      logger.info(`Machine Global Test - API Key: ${apiKey ? `SET (${apiKey.substring(0, 10)}...)` : 'NOT SET'}`);
+      logger.info(`Machine Global Test - Username: ${username || 'NOT SET'}`);
+
       if (!apiKey || !username || !password) {
         return { success: false, error: 'Missing Machine Global credentials' };
       }
 
-      // Test by listing webhooks
-      const response = await axios.get(`${baseUrl}/listarWebhook`, {
+      // Test using the official API endpoint per documentation
+      const testUrl = `${baseUrl}/api/integracao/solicitacao`;
+      logger.info(`Machine Global Test - Calling: GET ${testUrl}`);
+
+      const response = await axios.get(testUrl, {
         headers: { 'api-key': apiKey },
         auth: { username, password },
         timeout: 10000,
       });
+
+      logger.info(`Machine Global Test - Response status: ${response.status}`);
+      logger.info(`Machine Global Test - Response: ${JSON.stringify(response.data).substring(0, 200)}`);
 
       if (response.data && response.data.success !== false) {
         await this.updateValidationStatus('MACHINE_GLOBAL_API_KEY', true);
@@ -252,9 +268,14 @@ class CredentialsService {
 
       return { success: false, error: 'Invalid response from Machine Global API' };
     } catch (error: any) {
-      const errorMsg = error.response?.data?.errors?.[0] || error.message;
+      const status = error.response?.status;
+      const errorData = error.response?.data;
+      logger.error(`Machine Global Test - Failed: HTTP ${status}`);
+      logger.error(`Machine Global Test - Error response: ${JSON.stringify(errorData)}`);
+
+      const errorMsg = errorData?.error?.message || errorData?.errors?.[0] || error.message;
       await this.updateValidationStatus('MACHINE_GLOBAL_API_KEY', false);
-      return { success: false, error: errorMsg };
+      return { success: false, error: `${status ? `HTTP ${status}: ` : ''}${errorMsg}` };
     }
   }
 
