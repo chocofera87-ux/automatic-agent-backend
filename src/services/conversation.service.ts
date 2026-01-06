@@ -295,8 +295,12 @@ class ConversationService {
     metadata: any,
     context: ConversationContext
   ): Promise<void> {
-    // Extract intent from message
+    // Log current state for debugging
+    logger.info(`[ConversationFlow] Processing message - State: ${conversation.state}, MessageType: ${messageType}, Phone: ${conversation.customer.phoneNumber}`);
+
+    // Extract intent from message (with fallback if OpenAI fails)
     const intent = await openaiService.extractRideIntent(message, JSON.stringify(context));
+    logger.info(`[ConversationFlow] Intent extracted - isConfirmation: ${intent.isConfirmation}, isCancellation: ${intent.isCancellation}`);
 
     // Handle cancellation at any state
     if (intent.isCancellation && conversation.state !== ConversationState.GREETING) {
@@ -397,8 +401,11 @@ class ConversationService {
 
     // Check if user shared their GPS location
     if (messageType === 'location' && metadata.latitude && metadata.longitude) {
+      logger.info(`[ConversationFlow] GPS location received - Lat: ${metadata.latitude}, Lng: ${metadata.longitude}`);
+
       // REVERSE GEOCODE: Convert GPS to human-readable address (never show raw coords)
       const humanAddress = await reverseGeocode(metadata.latitude, metadata.longitude);
+      logger.info(`[ConversationFlow] Reverse geocoded address: ${humanAddress}`);
 
       context.origin = {
         address: humanAddress,
@@ -415,6 +422,7 @@ class ConversationService {
       }
 
       // Ask for destination - FREE TEXT input (simple, one action)
+      logger.info(`[ConversationFlow] Transitioning to AWAITING_DESTINATION state`);
       await this.updateConversation(conversation.id, ConversationState.AWAITING_DESTINATION, context);
 
       const destMsg = await whatsappService.sendTextMessage(
@@ -759,6 +767,7 @@ class ConversationService {
 
     // Check for confirmation - ONLY CREATE RIDE AFTER EXPLICIT CONFIRMATION
     if (intent.isConfirmation || lowerMessage.includes('confirm') || lowerMessage.includes('sim') || message === 'confirm_ride') {
+      logger.info(`[ConversationFlow] User confirmed ride - initiating ride creation`);
       await this.createRide(conversation, context);
       return;
     }
@@ -839,6 +848,8 @@ class ConversationService {
     await this.saveOutgoingMessage(conversation.id, 'Buscando motoristas', waitingMsg.messageId);
 
     try {
+      logger.info(`[ConversationFlow] Calling Machine Global createRide API`);
+
       // Create ride in Machine Global
       const rideResult = await machineGlobalService.createRide({
         origem: {
