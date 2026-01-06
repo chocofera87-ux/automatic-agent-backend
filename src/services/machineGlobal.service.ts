@@ -283,29 +283,45 @@ class MachineGlobalService {
 
   // Create a new ride
   async createRide(data: CreateRideRequest): Promise<RideResponse> {
+    // Log the request payload for debugging
+    const requestPayload = {
+      origem: {
+        endereco: data.origem.endereco,
+        latitude: data.origem.latitude,
+        longitude: data.origem.longitude,
+      },
+      destino: {
+        endereco: data.destino.endereco,
+        latitude: data.destino.latitude,
+        longitude: data.destino.longitude,
+      },
+      passageiro: {
+        nome: data.passageiro.nome,
+        telefone: data.passageiro.telefone,
+        documento: data.passageiro.documento,
+      },
+      categoria: data.categoria || 'Carro',
+      formaPagamento: data.formaPagamento || PAYMENT_METHODS.DINHEIRO,
+      observacoes: data.observacoes,
+    };
+
+    logger.info(`Machine Global createRide - Request payload: ${JSON.stringify(requestPayload)}`);
+    logger.info(`Machine Global createRide - Credentials configured: API Key=${!!this.apiKey}, Username=${!!this.username}, Password=${!!this.password}, BaseURL=${this.baseURL}`);
+
     try {
-      const response = await this.client.post('/api/integracao/abrirSolicitacao', {
-        origem: {
-          endereco: data.origem.endereco,
-          latitude: data.origem.latitude,
-          longitude: data.origem.longitude,
-        },
-        destino: {
-          endereco: data.destino.endereco,
-          latitude: data.destino.latitude,
-          longitude: data.destino.longitude,
-        },
-        passageiro: {
-          nome: data.passageiro.nome,
-          telefone: data.passageiro.telefone,
-          documento: data.passageiro.documento,
-        },
-        categoria: data.categoria || 'Carro',
-        formaPagamento: data.formaPagamento || PAYMENT_METHODS.DINHEIRO,
-        observacoes: data.observacoes,
-      });
+      const response = await this.client.post('/api/integracao/abrirSolicitacao', requestPayload);
+      logger.info(`Machine Global createRide - Success response: ${JSON.stringify(response.data)}`);
       return response.data;
-    } catch (error) {
+    } catch (error: any) {
+      // Enhanced error logging
+      if (axios.isAxiosError(error)) {
+        logger.error(`Machine Global createRide - HTTP Error: Status=${error.response?.status}, StatusText=${error.response?.statusText}`);
+        logger.error(`Machine Global createRide - Response data: ${JSON.stringify(error.response?.data)}`);
+        logger.error(`Machine Global createRide - Request URL: ${error.config?.url}`);
+        logger.error(`Machine Global createRide - Request headers: ${JSON.stringify(error.config?.headers)}`);
+      } else {
+        logger.error(`Machine Global createRide - Non-HTTP Error: ${error.message}`);
+      }
       return this.handleError(error);
     }
   }
