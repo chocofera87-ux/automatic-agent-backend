@@ -589,6 +589,97 @@ router.post('/test-machine-ride', async (req: Request, res: Response) => {
   }
 });
 
+// Debug endpoint to scan and find valid category IDs automatically
+// This endpoint tries multiple category IDs and reports which ones work
+router.get('/scan-machine-categories', async (req: Request, res: Response) => {
+  try {
+    // Load Machine Global credentials from database
+    const machineCreds = await credentialsService.getServiceCredentials('machine');
+
+    if (!machineCreds.MACHINE_GLOBAL_API_KEY || !machineCreds.MACHINE_GLOBAL_USERNAME || !machineCreds.MACHINE_GLOBAL_PASSWORD) {
+      return res.status(400).json({
+        success: false,
+        error: 'Machine Global credentials not configured. Please set them in Settings page.',
+      });
+    }
+
+    // Update service credentials
+    machineGlobalService.updateCredentials(
+      machineCreds.MACHINE_GLOBAL_API_KEY,
+      machineCreds.MACHINE_GLOBAL_USERNAME,
+      machineCreds.MACHINE_GLOBAL_PASSWORD,
+      machineCreds.MACHINE_GLOBAL_BASE_URL
+    );
+
+    // Test addresses
+    const testOrigem = {
+      endereco: 'Rua XV de Novembro, 100, Capivari, SP',
+      latitude: -22.9969,
+      longitude: -47.5077,
+    };
+    const testDestino = {
+      endereco: 'Av. Brasil, 500, Santa Bárbara d\'Oeste, SP',
+      latitude: -22.7549,
+      longitude: -47.4143,
+    };
+
+    // Try category IDs from 1 to 20
+    const maxId = parseInt(req.query.max as string) || 20;
+    const results: Array<{ id: number; success: boolean; price?: number; error?: string }> = [];
+    const validCategories: number[] = [];
+
+    logger.info(`Scanning Machine category IDs from 1 to ${maxId}...`);
+
+    for (let id = 1; id <= maxId; id++) {
+      try {
+        const result = await machineGlobalService.getPriceQuote({
+          origem: testOrigem,
+          destino: testDestino,
+          categoria_id: id,
+        });
+
+        const price = result.valor_estimado || result.cotacao?.valorEstimado;
+
+        if (result.success && price && price > 0) {
+          validCategories.push(id);
+          results.push({ id, success: true, price });
+          logger.info(`Category ID ${id}: VALID - Price R$${price}`);
+        } else {
+          results.push({
+            id,
+            success: false,
+            error: result.errors?.join(', ') || 'No price returned'
+          });
+          logger.info(`Category ID ${id}: INVALID`);
+        }
+      } catch (error: any) {
+        results.push({ id, success: false, error: error.message });
+        logger.info(`Category ID ${id}: ERROR - ${error.message}`);
+      }
+
+    }
+
+    res.json({
+      success: true,
+      summary: {
+        scannedRange: `1-${maxId}`,
+        validCategoryIds: validCategories,
+        totalValid: validCategories.length,
+      },
+      results,
+      nextSteps: validCategories.length > 0
+        ? `Found ${validCategories.length} valid category IDs: [${validCategories.join(', ')}]. Update CATEGORY_CONFIG in conversation.service.ts with these IDs.`
+        : 'No valid category IDs found. Check if credentials are correct or try a larger range with ?max=50',
+    });
+  } catch (error: any) {
+    logger.error('Category scan error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 // Debug endpoint to show what API documentation we need from Machine Global
 router.get('/machine-api-requirements', async (_req: Request, res: Response) => {
   res.json({
