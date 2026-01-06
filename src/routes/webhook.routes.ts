@@ -589,6 +589,57 @@ router.post('/test-machine-ride', async (req: Request, res: Response) => {
   }
 });
 
+// Debug endpoint to show current Machine credentials (masked) and URL being used
+router.get('/debug-machine-config', async (_req: Request, res: Response) => {
+  try {
+    // Load Machine Global credentials from database
+    const machineCreds = await credentialsService.getServiceCredentials('machine');
+
+    // Show what's stored vs what's actually being used
+    const storedUrl = machineCreds.MACHINE_GLOBAL_BASE_URL || 'NOT SET';
+
+    // Apply the same URL correction logic that machineGlobalService uses
+    let correctedUrl = storedUrl;
+    if (storedUrl !== 'NOT SET') {
+      // Sanitize - remove any path after domain
+      const urlMatch = storedUrl.match(/^(https?:\/\/[^\/]+)/);
+      if (urlMatch) {
+        correctedUrl = urlMatch[1];
+      }
+      // Force correct API URL
+      if (correctedUrl.includes('cloud.taximachine.com.br')) {
+        correctedUrl = 'https://api-trial.taximachine.com.br';
+      }
+    } else {
+      correctedUrl = 'https://api-trial.taximachine.com.br (default)';
+    }
+
+    res.json({
+      success: true,
+      storedConfig: {
+        apiKey: machineCreds.MACHINE_GLOBAL_API_KEY
+          ? `${machineCreds.MACHINE_GLOBAL_API_KEY.substring(0, 15)}...`
+          : 'NOT SET',
+        username: machineCreds.MACHINE_GLOBAL_USERNAME || 'NOT SET',
+        password: machineCreds.MACHINE_GLOBAL_PASSWORD ? 'SET (hidden)' : 'NOT SET',
+        baseUrl: storedUrl,
+      },
+      effectiveConfig: {
+        baseUrl: correctedUrl,
+        note: storedUrl !== correctedUrl
+          ? `URL was auto-corrected from "${storedUrl}" to "${correctedUrl}"`
+          : 'No URL correction needed',
+      },
+      recommendation: storedUrl.includes('cloud.taximachine')
+        ? 'IMPORTANT: The stored URL is wrong. Please update MACHINE_GLOBAL_BASE_URL in Settings to: https://api-trial.taximachine.com.br'
+        : 'URL looks correct',
+    });
+  } catch (error: any) {
+    logger.error('Debug config error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Debug endpoint to scan and find valid category IDs automatically
 // This endpoint tries multiple category IDs and reports which ones work
 router.get('/scan-machine-categories', async (req: Request, res: Response) => {
