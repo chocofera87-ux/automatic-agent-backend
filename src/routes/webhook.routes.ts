@@ -37,6 +37,11 @@ async function loadAllCredentials(): Promise<void> {
     // Load Machine Global credentials
     const machineCreds = await credentialsService.getServiceCredentials('machine');
     if (machineCreds.MACHINE_GLOBAL_API_KEY && machineCreds.MACHINE_GLOBAL_USERNAME && machineCreds.MACHINE_GLOBAL_PASSWORD) {
+      logger.info(`Loading Machine Global credentials from database:`);
+      logger.info(`  - API Key: ${machineCreds.MACHINE_GLOBAL_API_KEY.substring(0, 15)}...`);
+      logger.info(`  - Username: ${machineCreds.MACHINE_GLOBAL_USERNAME}`);
+      logger.info(`  - Password: SET (${machineCreds.MACHINE_GLOBAL_PASSWORD.length} chars)`);
+      logger.info(`  - Base URL: ${machineCreds.MACHINE_GLOBAL_BASE_URL || 'DEFAULT (api.taximachine.com.br)'}`);
       machineGlobalService.updateCredentials(
         machineCreds.MACHINE_GLOBAL_API_KEY,
         machineCreds.MACHINE_GLOBAL_USERNAME,
@@ -44,7 +49,10 @@ async function loadAllCredentials(): Promise<void> {
         machineCreds.MACHINE_GLOBAL_BASE_URL
       );
     } else {
-      logger.warn('Machine Global credentials incomplete in database');
+      logger.warn('Machine Global credentials incomplete in database:');
+      logger.warn(`  - API Key: ${machineCreds.MACHINE_GLOBAL_API_KEY ? 'SET' : 'NOT SET'}`);
+      logger.warn(`  - Username: ${machineCreds.MACHINE_GLOBAL_USERNAME ? 'SET' : 'NOT SET'}`);
+      logger.warn(`  - Password: ${machineCreds.MACHINE_GLOBAL_PASSWORD ? 'SET' : 'NOT SET'}`);
     }
   } catch (error) {
     logger.error('Failed to load credentials from database:', error);
