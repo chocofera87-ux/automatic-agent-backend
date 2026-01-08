@@ -622,12 +622,14 @@ router.get('/debug-machine-config', async (_req: Request, res: Response) => {
       if (urlMatch) {
         correctedUrl = urlMatch[1];
       }
-      // Force correct API URL
+      // Force correct API URL - trial.taximachine.com.br is the correct one
       if (correctedUrl.includes('cloud.taximachine.com.br')) {
-        correctedUrl = 'https://api-trial.taximachine.com.br';
+        correctedUrl = 'https://trial.taximachine.com.br';
+      } else if (correctedUrl.includes('api-trial.taximachine.com.br')) {
+        correctedUrl = 'https://trial.taximachine.com.br';
       }
     } else {
-      correctedUrl = 'https://api-trial.taximachine.com.br (default)';
+      correctedUrl = 'https://trial.taximachine.com.br (default)';
     }
 
     res.json({
@@ -646,8 +648,8 @@ router.get('/debug-machine-config', async (_req: Request, res: Response) => {
           ? `URL was auto-corrected from "${storedUrl}" to "${correctedUrl}"`
           : 'No URL correction needed',
       },
-      recommendation: storedUrl.includes('cloud.taximachine')
-        ? 'IMPORTANT: The stored URL is wrong. Please update MACHINE_GLOBAL_BASE_URL in Settings to: https://api-trial.taximachine.com.br'
+      recommendation: storedUrl.includes('cloud.taximachine') || storedUrl.includes('api-trial')
+        ? 'IMPORTANT: The stored URL is wrong. Please update MACHINE_GLOBAL_BASE_URL in Settings to: https://trial.taximachine.com.br'
         : 'URL looks correct',
     });
   } catch (error: any) {

@@ -166,8 +166,9 @@ class MachineGlobalService {
     this.apiKey = process.env.MACHINE_GLOBAL_API_KEY || '';
     this.username = process.env.MACHINE_GLOBAL_USERNAME || '';
     this.password = process.env.MACHINE_GLOBAL_PASSWORD || '';
-    // Official Machine Global API URL (not the web panel cloud.taximachine.com.br)
-    this.baseURL = process.env.MACHINE_GLOBAL_BASE_URL || 'https://api-trial.taximachine.com.br';
+    // Official Machine Global API URL - CORRECT: trial.taximachine.com.br
+    // NOT api-trial.taximachine.com.br or cloud.taximachine.com.br
+    this.baseURL = process.env.MACHINE_GLOBAL_BASE_URL || 'https://trial.taximachine.com.br';
 
     this.client = this.createClient();
   }
@@ -230,9 +231,13 @@ class MachineGlobalService {
     }
 
     // CRITICAL: Force correct API URL - cloud.taximachine is web panel, not API
+    // Also fix api-trial to trial (correct URL is trial.taximachine.com.br)
     if (this.baseURL.includes('cloud.taximachine.com.br')) {
-      logger.warn(`Machine Global: Correcting URL from cloud.taximachine to api-trial.taximachine`);
-      this.baseURL = 'https://api-trial.taximachine.com.br';
+      logger.warn(`Machine Global: Correcting URL from cloud.taximachine to trial.taximachine`);
+      this.baseURL = 'https://trial.taximachine.com.br';
+    } else if (this.baseURL.includes('api-trial.taximachine.com.br')) {
+      logger.warn(`Machine Global: Correcting URL from api-trial to trial.taximachine`);
+      this.baseURL = 'https://trial.taximachine.com.br';
     }
 
     this.client = this.createClient();
@@ -316,31 +321,20 @@ class MachineGlobalService {
     const endpoint = '/api/integracao/estimativa';
     const fullUrl = `${this.baseURL}${endpoint}`;
 
-    // Build payload in CORRECT Machine API format
-    // partida = origin, paradas = destinations (array)
+    // Build payload in CORRECT Machine API format per client documentation
+    // Uses: partida (origin), destino (destination), forma_pagamento
     const requestPayload: Record<string, any> = {
-      categoria_id: data.categoria_id || 1,
+      categoria_id: data.categoria_id || 4751, // Default to client's category ID
       partida: {
-        endereco: data.origem.endereco,
-        numero: data.origem.numero || '',
-        bairro: data.origem.bairro || '',
-        cidade: data.origem.cidade || '',
-        uf: data.origem.uf || 'SP',
         lat: data.origem.latitude?.toString() || '',
         lng: data.origem.longitude?.toString() || '',
+        endereco: data.origem.endereco,
       },
-      paradas: [
-        {
-          ordem: 0,
-          endereco: data.destino.endereco,
-          numero: data.destino.numero || '',
-          bairro: data.destino.bairro || '',
-          cidade: data.destino.cidade || '',
-          uf: data.destino.uf || 'SP',
-          lat: data.destino.latitude?.toString() || '',
-          lng: data.destino.longitude?.toString() || '',
-        },
-      ],
+      destino: {
+        lat: data.destino.latitude?.toString() || '',
+        lng: data.destino.longitude?.toString() || '',
+        endereco: data.destino.endereco,
+      },
     };
 
     logger.info(`========== MACHINE PRICE QUOTE REQUEST ==========`);
@@ -406,47 +400,36 @@ class MachineGlobalService {
 
   // Create a new ride using official Machine Global API
   // Endpoint: POST /api/integracao/abrirSolicitacao
-  // CORRECT PAYLOAD FORMAT per client documentation:
+  // CORRECT PAYLOAD FORMAT per client's screenshot:
   // {
-  //   "categoria_id": 1,
-  //   "tipo_pagamento": "D",
-  //   "cliente": { "nome": "...", "telefone": "..." },
-  //   "partida": { "endereco": "...", "numero": "...", "bairro": "...", "cidade": "...", "uf": "...", "lat": "...", "lng": "..." },
-  //   "paradas": [{ "ordem": 0, "endereco": "...", ... }]
+  //   "cliente_id": 12345,
+  //   "categoria_id": 4751,
+  //   "forma_pagamento": "D",
+  //   "partida": { "lat": "-22.123", "lng": "-47.456", "endereco": "Rua X" },
+  //   "destino": { "lat": "-22.789", "lng": "-47.999", "endereco": "Rua Y" }
   // }
   async createRide(data: CreateRideRequest): Promise<RideResponse> {
     const endpoint = '/api/integracao/abrirSolicitacao';
     const fullUrl = `${this.baseURL}${endpoint}`;
 
-    // Build request payload in CORRECT Machine API format
+    // Build request payload in CORRECT Machine API format per client documentation
     const requestPayload: Record<string, any> = {
-      categoria_id: data.categoria_id || 1,
-      tipo_pagamento: data.formaPagamento || PAYMENT_METHODS.DINHEIRO,
+      categoria_id: data.categoria_id || 4751, // Client's default category ID
+      forma_pagamento: data.formaPagamento || PAYMENT_METHODS.DINHEIRO,
       cliente: {
         nome: data.passageiro.nome,
         telefone: data.passageiro.telefone.replace(/\D/g, ''), // Remove non-digits
       },
       partida: {
-        endereco: data.origem.endereco,
-        numero: data.origem.numero || '',
-        bairro: data.origem.bairro || '',
-        cidade: data.origem.cidade || '',
-        uf: data.origem.uf || 'SP',
         lat: data.origem.latitude?.toString() || '',
         lng: data.origem.longitude?.toString() || '',
+        endereco: data.origem.endereco,
       },
-      paradas: [
-        {
-          ordem: 0,
-          endereco: data.destino.endereco,
-          numero: data.destino.numero || '',
-          bairro: data.destino.bairro || '',
-          cidade: data.destino.cidade || '',
-          uf: data.destino.uf || 'SP',
-          lat: data.destino.latitude?.toString() || '',
-          lng: data.destino.longitude?.toString() || '',
-        },
-      ],
+      destino: {
+        lat: data.destino.latitude?.toString() || '',
+        lng: data.destino.longitude?.toString() || '',
+        endereco: data.destino.endereco,
+      },
     };
 
     // Add observacoes if provided

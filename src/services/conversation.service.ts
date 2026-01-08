@@ -101,17 +101,17 @@ interface CategoryConfig {
   buttonId: string;       // WhatsApp button ID
 }
 
-// Machine category IDs - MUST match Machine system configuration
-// TODO: Get exact IDs from Machine support/dashboard
+// Machine category IDs - From client's Machine Global configuration
+// Category ID 4751 is the client's configured category (confirmed via screenshot)
 const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
   CARRO_PEQUENO: {
-    categoria_id: 1,      // Machine category ID for standard car
+    categoria_id: 4751,   // Machine category ID from client's system
     displayName: 'Carro Pequeno',
     description: 'Econômico',
     buttonId: 'cat_pequeno',
   },
   CARRO_GRANDE: {
-    categoria_id: 2,      // Machine category ID for larger/premium car
+    categoria_id: 4751,   // Using same category until client provides different ID for larger cars
     displayName: 'Carro Grande',
     description: 'Conforto / Família',
     buttonId: 'cat_grande',
