@@ -622,14 +622,16 @@ router.get('/debug-machine-config', async (_req: Request, res: Response) => {
       if (urlMatch) {
         correctedUrl = urlMatch[1];
       }
-      // Force correct API URL - trial.taximachine.com.br is the correct one
+      // Force correct API URL - vendas.machine.global per Machine support
       if (correctedUrl.includes('cloud.taximachine.com.br')) {
-        correctedUrl = 'https://trial.taximachine.com.br';
-      } else if (correctedUrl.includes('api-trial.taximachine.com.br')) {
-        correctedUrl = 'https://trial.taximachine.com.br';
+        correctedUrl = 'https://vendas.machine.global';
+      } else if (correctedUrl.includes('api-trial.taximachine.com.br') || correctedUrl.includes('trial.taximachine.com.br')) {
+        correctedUrl = 'https://vendas.machine.global';
+      } else if (correctedUrl.includes('api.taximachine.com.br')) {
+        correctedUrl = 'https://vendas.machine.global';
       }
     } else {
-      correctedUrl = 'https://trial.taximachine.com.br (default)';
+      correctedUrl = 'https://vendas.machine.global (default)';
     }
 
     res.json({
@@ -648,8 +650,8 @@ router.get('/debug-machine-config', async (_req: Request, res: Response) => {
           ? `URL was auto-corrected from "${storedUrl}" to "${correctedUrl}"`
           : 'No URL correction needed',
       },
-      recommendation: storedUrl.includes('cloud.taximachine') || storedUrl.includes('api-trial')
-        ? 'IMPORTANT: The stored URL is wrong. Please update MACHINE_GLOBAL_BASE_URL in Settings to: https://trial.taximachine.com.br'
+      recommendation: storedUrl.includes('taximachine.com.br')
+        ? 'IMPORTANT: The stored URL is wrong. Please update MACHINE_GLOBAL_BASE_URL in Settings to: https://vendas.machine.global'
         : 'URL looks correct',
     });
   } catch (error: any) {

@@ -166,9 +166,10 @@ class MachineGlobalService {
     this.apiKey = process.env.MACHINE_GLOBAL_API_KEY || '';
     this.username = process.env.MACHINE_GLOBAL_USERNAME || '';
     this.password = process.env.MACHINE_GLOBAL_PASSWORD || '';
-    // Official Machine Global API URL - CORRECT: trial.taximachine.com.br
-    // NOT api-trial.taximachine.com.br or cloud.taximachine.com.br
-    this.baseURL = process.env.MACHINE_GLOBAL_BASE_URL || 'https://trial.taximachine.com.br';
+    // Official Machine Global API URL - CORRECT per Machine support
+    // Base: https://vendas.machine.global
+    // Full endpoint: https://vendas.machine.global/api/integracao/
+    this.baseURL = process.env.MACHINE_GLOBAL_BASE_URL || 'https://vendas.machine.global';
 
     this.client = this.createClient();
   }
@@ -230,14 +231,17 @@ class MachineGlobalService {
       }
     }
 
-    // CRITICAL: Force correct API URL - cloud.taximachine is web panel, not API
-    // Also fix api-trial to trial (correct URL is trial.taximachine.com.br)
+    // CRITICAL: Force correct API URL per Machine support
+    // Correct URL: https://vendas.machine.global (for TRIAL account)
     if (this.baseURL.includes('cloud.taximachine.com.br')) {
-      logger.warn(`Machine Global: Correcting URL from cloud.taximachine to trial.taximachine`);
-      this.baseURL = 'https://trial.taximachine.com.br';
-    } else if (this.baseURL.includes('api-trial.taximachine.com.br')) {
-      logger.warn(`Machine Global: Correcting URL from api-trial to trial.taximachine`);
-      this.baseURL = 'https://trial.taximachine.com.br';
+      logger.warn(`Machine Global: Correcting URL from cloud.taximachine to vendas.machine.global`);
+      this.baseURL = 'https://vendas.machine.global';
+    } else if (this.baseURL.includes('api-trial.taximachine.com.br') || this.baseURL.includes('trial.taximachine.com.br')) {
+      logger.warn(`Machine Global: Correcting URL from trial/api-trial.taximachine to vendas.machine.global`);
+      this.baseURL = 'https://vendas.machine.global';
+    } else if (this.baseURL.includes('api.taximachine.com.br')) {
+      logger.warn(`Machine Global: Correcting URL from api.taximachine to vendas.machine.global`);
+      this.baseURL = 'https://vendas.machine.global';
     }
 
     this.client = this.createClient();
