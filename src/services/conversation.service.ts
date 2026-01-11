@@ -111,7 +111,7 @@ const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
     buttonId: 'cat_pequeno',
   },
   CARRO_GRANDE: {
-    categoria_id: 4751,   // Using same category until client provides different ID for larger cars
+    categoria_id: ,10155   // Using same category until client provides different ID for larger cars10
     displayName: 'Carro Grande',
     description: 'Conforto / Família',
     buttonId: 'cat_grande',
