@@ -217,17 +217,20 @@ class MachineGlobalService {
   }
 
   // Update credentials dynamically (from database)
-  updateCredentials(apiKey: string, username: string, password: string, baseURL?: string): void {
-    this.apiKey = apiKey;
-    this.username = username;
-    this.password = password;
-    if (baseURL) {
-      // Sanitize the base URL - remove any path after the domain
-      const urlMatch = baseURL.match(/^(https?:\/\/[^\/]+)/);
-      if (urlMatch) {
-        this.baseURL = urlMatch[1];
-      } else {
-        this.baseURL = baseURL;
+ updateCredentials(apiKey: string, username: string, password: string, baseURL?: string): void {
+  this.apiKey = apiKey;
+  this.username = username;
+  this.password = password;
+
+  if (baseURL) {
+    // mantém /api/integracao e remove só a barra final
+    this.baseURL = baseURL.replace(/\/$/, '');
+  }
+
+  this.client = this.createClient();
+  logger.info(`Machine Global credentials updated. BaseURL: ${this.baseURL}`);
+}
+
       }
     }
 
