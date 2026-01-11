@@ -229,9 +229,6 @@ class MachineGlobalService {
 
   this.client = this.createClient();
   logger.info(`Machine Global credentials updated. BaseURL: ${this.baseURL}`);
-}
-
-      }
     }
 
     // CRITICAL: Force correct API URL per Machine support
