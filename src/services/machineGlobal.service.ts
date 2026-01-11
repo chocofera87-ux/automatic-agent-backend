@@ -169,7 +169,7 @@ class MachineGlobalService {
     // Official Machine Global API URL - CORRECT per Machine support
     // Base: https://vendas.machine.global
     // Full endpoint: https://vendas.machine.global/api/integracao/
-    this.baseURL = process.env.MACHINE_GLOBAL_BASE_URL ||´https://api.taximachine.com.br/api/integracao';
+    this.baseURL = process.env.MACHINE_GLOBAL_BASE_URL ||'https://api.taximachine.com.br/api/integracao';
 
     this.client = this.createClient();
   }
