@@ -217,7 +217,8 @@ class MachineGlobalService {
   }
 
   // Update credentials dynamically (from database)
- updateCredentials(apiKey: string, username: string, password: string, baseURL?: string): void {
+// Update credentials dynamically (from database)
+updateCredentials(apiKey: string, username: string, password: string, baseURL?: string): void {
   this.apiKey = apiKey;
   this.username = username;
   this.password = password;
@@ -227,26 +228,12 @@ class MachineGlobalService {
     this.baseURL = baseURL.replace(/\/$/, '');
   }
 
+  // ✅ NÃO force vendas.machine.global aqui
+  // ✅ porque você está usando api.taximachine.com.br/api/integracao
+
   this.client = this.createClient();
   logger.info(`Machine Global credentials updated. BaseURL: ${this.baseURL}`);
-    }
-
-    // CRITICAL: Force correct API URL per Machine support
-    // Correct URL: https://vendas.machine.global (for TRIAL account)
-    if (this.baseURL.includes('cloud.taximachine.com.br')) {
-      logger.warn(`Machine Global: Correcting URL from cloud.taximachine to vendas.machine.global`);
-      this.baseURL = 'https://vendas.machine.global';
-    } else if (this.baseURL.includes('api-trial.taximachine.com.br') || this.baseURL.includes('trial.taximachine.com.br')) {
-      logger.warn(`Machine Global: Correcting URL from trial/api-trial.taximachine to vendas.machine.global`);
-      this.baseURL = 'https://vendas.machine.global';
-    } else if (this.baseURL.includes('api.taximachine.com.br')) {
-      logger.warn(`Machine Global: Correcting URL from api.taximachine to vendas.machine.global`);
-      this.baseURL = 'https://vendas.machine.global';
-    }
-
-    this.client = this.createClient();
-    logger.info(`Machine Global credentials updated. BaseURL: ${this.baseURL}`);
-  }
+}
 
   // Check if credentials are configured
   hasCredentials(): boolean {
