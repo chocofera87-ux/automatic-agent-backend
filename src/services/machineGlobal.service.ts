@@ -217,7 +217,6 @@ class MachineGlobalService {
   }
 
   // Update credentials dynamically (from database)
-// Update credentials dynamically (from database)
 updateCredentials(apiKey: string, username: string, password: string, baseURL?: string): void {
   this.apiKey = apiKey;
   this.username = username;
