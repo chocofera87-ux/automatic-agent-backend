@@ -489,7 +489,7 @@ class MachineGlobalService {
   // Get ride status
   async getRideStatus(rideId: string): Promise<RideResponse> {
     try {
-      const response = await this.client.get(`/api/integracao/solicitacao/${rideId}`);
+      const response = await this.client.get(`/solicitacao/${rideId}`);
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -504,7 +504,7 @@ class MachineGlobalService {
     telefone?: string;
   }): Promise<{ success: boolean; corridas?: any[]; errors?: string[] }> {
     try {
-      const response = await this.client.get('/api/integracao/solicitacao', {
+      const response = await this.client.get('/solicitacao', {
         params: filters,
       });
       return response.data;
@@ -516,7 +516,7 @@ class MachineGlobalService {
   // Cancel a ride - POST /api/integracao/cancelar
   async cancelRide(rideId: string, motivo?: string): Promise<{ success: boolean; errors?: string[] }> {
     try {
-      const response = await this.client.post('/api/integracao/cancelar', {
+      const response = await this.client.post('/cancelar', {
         solicitacao_id: rideId,
         motivo: motivo || 'Cancelado pelo cliente',
       });
@@ -533,7 +533,7 @@ class MachineGlobalService {
     errors?: string[];
   }> {
     try {
-      const response = await this.client.get(`/api/integracao/posicaoCondutor/${rideId}`);
+      const response = await this.client.get(`/posicaoCondutor/${rideId}`);
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -543,7 +543,7 @@ class MachineGlobalService {
   // List available drivers
   async listDrivers(): Promise<{ success: boolean; condutores?: any[]; errors?: string[] }> {
     try {
-      const response = await this.client.get('/api/integracao/condutor');
+      const response = await this.client.get('/condutor');
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -553,7 +553,7 @@ class MachineGlobalService {
   // Get customer info
   async getCustomer(telefone: string): Promise<{ success: boolean; cliente?: any; errors?: string[] }> {
     try {
-      const response = await this.client.get('/api/integracao/cliente', {
+      const response = await this.client.get('/cliente', {
         params: { telefone },
       });
       return response.data;
