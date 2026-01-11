@@ -322,7 +322,7 @@ class MachineGlobalService {
   // Get price quote / estimation from Machine API
   // This should be used to get the REAL price from Machine, not calculated locally
   async getPriceQuote(data: PriceQuoteRequest): Promise<PriceQuoteResponse> {
-    const endpoint = '/api/integracao/estimativa';
+    const endpoint = '/estimativa';
     const fullUrl = `${this.baseURL}${endpoint}`;
 
     // Build payload in CORRECT Machine API format per client documentation
@@ -413,7 +413,7 @@ class MachineGlobalService {
   //   "destino": { "lat": "-22.789", "lng": "-47.999", "endereco": "Rua Y" }
   // }
   async createRide(data: CreateRideRequest): Promise<RideResponse> {
-    const endpoint = '/api/integracao/abrirSolicitacao';
+    const endpoint = '/abrirSolicitacao';
     const fullUrl = `${this.baseURL}${endpoint}`;
 
     // Build request payload in CORRECT Machine API format per client documentation
