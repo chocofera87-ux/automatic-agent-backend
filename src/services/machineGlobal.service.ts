@@ -202,16 +202,18 @@ class MachineGlobalService {
     );
 
     // Response interceptor for logging
-    client.interceptors.response.use(
-      (response) => {
-        logger.info(`Machine API Response: ${response.status} ${response.config.url}`);
-        return response;
-      },
-      (error: AxiosError) => {
-        logger.error(`Machine API Error: ${error.response?.status} - ${error.message}`);
-        return Promise.reject(error);
-      }
-    );
+    client.interceptors.request.use((config) => {
+  const base = config.baseURL || '';
+  const url = config.url || '';
+  const fullUrl = `${base.replace(/\/$/, '')}/${url.replace(/^\//, '')}`;
+
+  logger.info(`[MACHINE] METHOD: ${config.method?.toUpperCase()}`);
+  logger.info(`[MACHINE] baseURL: ${base}`);
+  logger.info(`[MACHINE] url: ${url}`);
+  logger.info(`[MACHINE] FULL URL: ${fullUrl}`);
+  return config;
+});
+
 
     return client;
   }
