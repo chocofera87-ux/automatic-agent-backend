@@ -224,21 +224,21 @@ class CredentialsService {
       const apiKey = await this.getCredential('MACHINE_GLOBAL_API_KEY');
       const username = await this.getCredential('MACHINE_GLOBAL_USERNAME');
       const password = await this.getCredential('MACHINE_GLOBAL_PASSWORD');
-      let baseUrl = await this.getCredential('MACHINE_GLOBAL_BASE_URL') || 'https://api-trial.taximachine.com.br';
+      let baseUrl = await this.getCredential('MACHINE_GLOBAL_BASE_URL') || ''https://api.taximachine.com.br/api/integracao'
+';
 
-      // Sanitize base URL - remove any path (e.g., /site/login)
-      const urlMatch = baseUrl.match(/^(https?:\/\/[^\/]+)/);
-      if (urlMatch) {
-        baseUrl = urlMatch[1];
-      }
+      // let baseUrl =
+  (await this.getCredential('MACHINE_GLOBAL_BASE_URL')) ||
+  'https://api.taximachine.com.br/api/integracao';
 
-      // Force correct API URL if wrong one is stored
-      if (baseUrl.includes('cloud.taximachine.com.br')) {
-        baseUrl = 'https://api-trial.taximachine.com.br';
-        logger.warn(`Machine Global: Corrected base URL from cloud.taximachine to api-trial.taximachine`);
-      }
+baseUrl = baseUrl.replace(/\/$/, '');
 
-      logger.info(`Machine Global Test - Using Base URL: ${baseUrl}`);
+if (!baseUrl.endsWith('/api/integracao')) {
+  baseUrl = baseUrl.replace(/\/api\/integracao.*/, '');
+baseUrl = `${baseUrl}/api/integracao`;
+}
+
+logger.info(`Machine Global Test - Using Base URL: ${baseUrl}`);
       logger.info(`Machine Global Test - API Key: ${apiKey ? `SET (${apiKey.substring(0, 10)}...)` : 'NOT SET'}`);
       logger.info(`Machine Global Test - Username: ${username || 'NOT SET'}`);
 
@@ -246,8 +246,7 @@ class CredentialsService {
         return { success: false, error: 'Missing Machine Global credentials' };
       }
 
-      // Test using the official API endpoint per documentation
-      const testUrl = `${baseUrl}/api/integracao/solicitacao`;
+      const testUrl = `${baseUrl}/listarWebhook`;
       logger.info(`Machine Global Test - Calling: GET ${testUrl}`);
 
       const response = await axios.get(testUrl, {
