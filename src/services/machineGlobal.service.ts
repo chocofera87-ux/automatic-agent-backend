@@ -298,7 +298,7 @@ class MachineGlobalService {
   }
 
   async getPriceQuote(data: PriceQuoteRequest): Promise<PriceQuoteResponse> {
-    const endpoint = '/estimativa';
+    const endpoint = '/estimarsolicitacao';
     const fullUrl = `${this.baseURL}${endpoint}`;
 
     const requestPayload: Record<string, any> = {
