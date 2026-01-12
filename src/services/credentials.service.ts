@@ -235,11 +235,11 @@ const baseUrlFromDb =
   (await this.getCredential('MACHINE_GLOBAL_BASE_URL')) ||
   'https://api.taximachine.com.br/api/integracao';
 
-const raw = baseUrlFromDb.replace(/\/+$/, '');
+const normalized = baseUrlFromDb
+  .replace(/\/api\/integracao.*/i, '')
+  .replace(/\/+$/, '');
 
-this.baseURL = raw.includes('/api/integracao')
-  ? raw
-  : `${raw}/api/integracao`;
+this.baseURL = `${normalized}/api/integracao`;
 
 }
 
