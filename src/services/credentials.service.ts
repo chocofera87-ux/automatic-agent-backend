@@ -231,11 +231,16 @@ class CredentialsService {
   (await this.getCredential('MACHINE_GLOBAL_BASE_URL')) ||
   'https://api.taximachine.com.br/api/integracao';
 
-baseUrl = baseUrl.replace(/\/$/, '');
+const baseUrlFromDb =
+  (await this.getCredential('MACHINE_GLOBAL_BASE_URL')) ||
+  'https://api.taximachine.com.br/api/integracao';
 
-if (!baseUrl.endsWith('/api/integracao')) {
-  baseUrl = baseUrl.replace(/\/api\/integracao.*/, '');
-baseUrl = `${baseUrl}/api/integracao`;
+const raw = baseUrlFromDb.replace(/\/+$/, '');
+
+this.baseURL = raw.includes('/api/integracao')
+  ? raw
+  : `${raw}/api/integracao`;
+
 }
 
 logger.info(`Machine Global Test - Using Base URL: ${baseUrl}`);
