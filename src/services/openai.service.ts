@@ -127,7 +127,8 @@ class OpenAIService {
         : '';
 
       const response = await this.client.chat.completions.create({
-        model: 'gpt-4-turbo-preview',
+      model: "gpt-4.1-mini"
+ 
         messages: [
           { role: 'system', content: RIDE_EXTRACTION_PROMPT + contextPrompt },
           { role: 'user', content: message },
