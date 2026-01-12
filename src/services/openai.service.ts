@@ -129,7 +129,7 @@ class OpenAIService {
       const response = await this.client.chat.completions.create({
       model: "gpt-4.1-mini"
  
-        messages: [
+        input: [
           { role: 'system', content: RIDE_EXTRACTION_PROMPT + contextPrompt },
           { role: 'user', content: message },
         ],
@@ -137,9 +137,7 @@ class OpenAIService {
         response_format: { type: 'json_object' },
       });
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response from OpenAI');
+      const content = response.output_text;
       }
 
       const parsed = JSON.parse(content);
