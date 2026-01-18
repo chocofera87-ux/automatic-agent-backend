@@ -213,22 +213,33 @@ class MachineGlobalService {
     });
 
     // Request logging
-    client.interceptors.request.use(
-      (config) => {
-        const base = config.baseURL || '';
-        const url = config.url || '';
-        const fullUrl = `${base.replace(/\/$/, '')}/${url.replace(/^\//, '')}`;
+   client.interceptors.request.use(
+  (config) => {
+    const base = config.baseURL || '';
+    const url = config.url || '';
+    const fullUrl = `${base.replace(/\/$/, '')}/${url.replace(/^\//, '')}`;
 
-        logger.info(`Machine API Request: ${String(config.method || '').toUpperCase()} ${url}`);
-        logger.info(`[MACHINE] FULL URL: ${fullUrl}`);
+    logger.info(`Machine API Request: ${String(config.method || '').toUpperCase()} ${url}`);
+    logger.info(`[MACHINE] FULL URL: ${fullUrl}`);
 
-        return config;
-      },
-      (error) => {
-        logger.error('Machine API Request Error:', error);
-        return Promise.reject(error);
+    // log do body REAL do axios
+    if (config.data) {
+      try {
+        const parsed = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+        logger.info(`[MACHINE] Request Body: ${JSON.stringify(parsed, null, 2)}`);
+      } catch {
+        logger.info(`[MACHINE] Request Body: ${String(config.data)}`);
       }
-    );
+    }
+
+    return config;
+  },
+  (error) => {
+    logger.error('Machine API Request Error:', error);
+    return Promise.reject(error);
+  }
+);
+
 
     // Response logging
     client.interceptors.response.use(
@@ -391,8 +402,8 @@ class MachineGlobalService {
 
     logger.info(`========== MACHINE PRICE QUOTE REQUEST ==========`); 
     logger.info(`[MACHINE] POST ${fullUrl}`);
-    logger.info(`[MACHINE] Request Body: ${JSON.stringify(requestPayload, null, 2)}`);
-    logger.info(`=================================================`);
+    logger.info(`[MACHINE] Request Body: ${config.data || ''}`);
+   logger.info(`=================================================`);
 
     try {
       const response = await this.client.post(endpoint, requestPayload);
