@@ -1,48 +1,28 @@
-import axios, { AxiosError, AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../utils/logger.js';
 
-// =========================
-// Types for Machine Global API
-// =========================
+/**
+ * MACHINE GLOBAL SERVICE (Production-ready)
+ * - Normalizes baseURL to ALWAYS include /api/integracao
+ * - Uses api-key header + Basic Auth (username/password)
+ * - Uses correct estimate endpoint: POST /estimarSolicitacao
+ * - Never sends lat/lng empty strings
+ * - Logs full URL and payload safely
+ */
 
-export interface MachineAddress {
-  endereco: string;
+export interface MachineAddressInput {
+  endereco?: string;
   numero?: string;
   bairro?: string;
   cidade?: string;
   uf?: string;
-  lat?: string; // legacy
-  lng?: string; // legacy
-}
-
-export interface MachineCliente {
-  nome: string;
-  telefone: string;
-}
-
-export interface MachineParada extends MachineAddress {
-  ordem: number;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface CreateRideRequest {
-  origem: {
-    endereco: string;
-    numero?: string;
-    bairro?: string;
-    cidade?: string;
-    uf?: string;
-    latitude?: number;
-    longitude?: number;
-  };
-  destino: {
-    endereco: string;
-    numero?: string;
-    bairro?: string;
-    cidade?: string;
-    uf?: string;
-    latitude?: number;
-    longitude?: number;
-  };
+  origem: MachineAddressInput;
+  destino: MachineAddressInput;
   passageiro: {
     nome: string;
     telefone: string;
@@ -53,35 +33,14 @@ export interface CreateRideRequest {
 }
 
 export interface PriceQuoteRequest {
-  origem: {
-    endereco: string;
-    numero?: string;
-    bairro?: string;
-    cidade?: string;
-    uf?: string;
-    latitude?: number;
-    longitude?: number;
-  };
-  destino: {
-    endereco: string;
-    numero?: string;
-    bairro?: string;
-    cidade?: string;
-    uf?: string;
-    latitude?: number;
-    longitude?: number;
-  };
+  origem: MachineAddressInput;
+  destino: MachineAddressInput;
   categoria_id?: number;
 }
 
 export interface PriceQuoteResponse {
   success: boolean;
-  cotacao?: {
-    valorEstimado: number;
-    distanciaKm: number;
-    tempoEstimado: number;
-    categoria: string;
-  };
+  cotacao?: any;
   valor_estimado?: number;
   distancia_km?: number;
   tempo_estimado?: number;
@@ -90,18 +49,7 @@ export interface PriceQuoteResponse {
 
 export interface RideResponse {
   success: boolean;
-  corrida?: {
-    id: string;
-    status: string;
-    valorEstimado?: number;
-    motorista?: {
-      nome: string;
-      telefone: string;
-      veiculo?: string;
-      placa?: string;
-      avaliacao?: number;
-    };
-  };
+  corrida?: any;
   errors?: string[];
 }
 
@@ -137,25 +85,28 @@ export const PAYMENT_METHODS = {
   CARTEIRA: 'R',
 } as const;
 
-export const RIDE_STATUS = {
-  DISTRIBUINDO: 'D',
-  AGUARDANDO_ACEITE: 'G',
-  PENDENTE: 'P',
-  NAO_ATENDIDA: 'N',
-  ACEITA: 'A',
-  EM_ANDAMENTO: 'E',
-  FINALIZADA: 'F',
-  CANCELADA: 'C',
-  AGUARDANDO_PAGAMENTO: 'R',
+const ENDPOINTS = {
+  // Corridas
+  ESTIMAR: '/estimarSolicitacao',
+  ABRIR: '/abrirSolicitacao',
+  STATUS: (id: string) => `/solicitacao/${id}`,
+  LISTAR_SOLICITACOES: '/solicitacao',
+  CANCELAR: '/cancelar',
+  POSICAO_CONDUTOR: (id: string) => `/posicaoCondutor/${id}`,
+
+  // Cadastros
+  CONDUTORES: '/condutor',
+  CLIENTE: '/cliente',
+
+  // Webhooks
+  LISTAR_WEBHOOK: '/listarWebhook',
+  CADASTRAR_WEBHOOK: '/cadastrarWebhook',
+  ATUALIZAR_WEBHOOK: (id: string) => `/atualizarWebhook/${id}`,
+  DELETAR_WEBHOOK: (id: string) => `/deletarWebhook/${id}`,
 } as const;
 
-// =========================
-// Service
-// =========================
-
 class MachineGlobalService {
-  private client!: AxiosInstance;
-
+  private client: AxiosInstance;
   private apiKey: string;
   private username: string;
   private password: string;
@@ -166,31 +117,24 @@ class MachineGlobalService {
     this.username = process.env.MACHINE_GLOBAL_USERNAME || '';
     this.password = process.env.MACHINE_GLOBAL_PASSWORD || '';
 
-    // ✅ Production-ready:
-    // Set MACHINE_GLOBAL_BASE_URL to either:
-    // - https://api.taximachine.com.br (prod)
-    // - https://api-trial.taximachine.com.br (trial)
-    // - OR already including /api/integracao
-    this.baseURL = this.normalizeBaseURL(
-      process.env.MACHINE_GLOBAL_BASE_URL || 'https://api.taximachine.com.br'
-    );
+    // You may set either:
+    // - https://api.taximachine.com.br
+    // - https://api.taximachine.com.br/api/integracao
+    // This service will normalize to include /api/integracao only once.
+    const envBase = process.env.MACHINE_GLOBAL_BASE_URL || 'https://api.taximachine.com.br';
+    this.baseURL = this.normalizeBaseURL(envBase);
 
     this.client = this.createClient();
-
-    logger.info(`[MACHINE] Service initialized.`);
-    logger.info(`[MACHINE] BaseURL: ${this.baseURL}`);
-    logger.info(
-      `[MACHINE] API Key: ${this.apiKey ? `SET (${this.apiKey.substring(0, 10)}...)` : 'NOT SET'}`
-    );
-    logger.info(`[MACHINE] Username: ${this.username ? 'SET' : 'NOT SET'}`);
   }
 
-  // Guarantees exactly one /api/integracao and no trailing slashes
+  /**
+   * Ensures baseURL is ALWAYS: <domain>/api/integracao (exactly once)
+   */
   private normalizeBaseURL(input: string): string {
     const raw = (input || '').trim().replace(/\/+$/, '');
-
     if (!raw) return 'https://api.taximachine.com.br/api/integracao';
 
+    // If user already put /api/integracao (maybe repeated), collapse it:
     if (raw.includes('/api/integracao')) {
       return raw.replace(/(\/api\/integracao)+/g, '/api/integracao');
     }
@@ -212,34 +156,32 @@ class MachineGlobalService {
       },
     });
 
-    // Request logging
-   client.interceptors.request.use(
-  (config) => {
-    const base = config.baseURL || '';
-    const url = config.url || '';
-    const fullUrl = `${base.replace(/\/$/, '')}/${url.replace(/^\//, '')}`;
+    // Request logging (never lies)
+    client.interceptors.request.use(
+      (config) => {
+        const base = config.baseURL || '';
+        const url = config.url || '';
+        const fullUrl = `${base.replace(/\/$/, '')}/${url.replace(/^\//, '')}`;
 
-    logger.info(`Machine API Request: ${String(config.method || '').toUpperCase()} ${url}`);
-    logger.info(`[MACHINE] FULL URL: ${fullUrl}`);
+        logger.info(`Machine API Request: ${String(config.method || '').toUpperCase()} ${url}`);
+        logger.info(`[MACHINE] FULL URL: ${fullUrl}`);
 
-    // log do body REAL do axios
-    if (config.data) {
-      try {
-        const parsed = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
-        logger.info(`[MACHINE] Request Body: ${JSON.stringify(parsed, null, 2)}`);
-      } catch {
-        logger.info(`[MACHINE] Request Body: ${String(config.data)}`);
+        if (config.data) {
+          try {
+            const parsed = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+            logger.info(`[MACHINE] Request Body: ${JSON.stringify(parsed, null, 2)}`);
+          } catch {
+            logger.info(`[MACHINE] Request Body: ${String(config.data)}`);
+          }
+        }
+
+        return config;
+      },
+      (error) => {
+        logger.error('Machine API Request Error:', error);
+        return Promise.reject(error);
       }
-    }
-
-    return config;
-  },
-  (error) => {
-    logger.error('Machine API Request Error:', error);
-    return Promise.reject(error);
-  }
-);
-
+    );
 
     // Response logging
     client.interceptors.response.use(
@@ -253,6 +195,7 @@ class MachineGlobalService {
       }
     );
 
+    logger.info(`[MACHINE] Client created. BaseURL: ${this.baseURL}`);
     return client;
   }
 
@@ -266,74 +209,107 @@ class MachineGlobalService {
     }
 
     this.client = this.createClient();
-    logger.info(`Machine Global credentials updated. BaseURL: ${this.baseURL}`);
+    logger.info(`[MACHINE] Credentials updated. BaseURL: ${this.baseURL}`);
   }
 
   hasCredentials(): boolean {
     return !!(this.apiKey && this.username && this.password);
   }
 
-  // =========================
-  // Helpers
-  // =========================
-
-  private sanitizePhone(phone: string): string {
-    return (phone || '').replace(/\D/g, '');
+  /**
+   * Machine requires api-key + basic auth.
+   * We use listWebhooks as a quick smoke-test.
+   */
+  async verifyConnection(): Promise<boolean> {
+    try {
+      const r = await this.listWebhooks();
+      return r.success !== false;
+    } catch (e) {
+      logger.error('[MACHINE] verifyConnection failed:', e);
+      return false;
+    }
   }
 
   /**
-   * IMPORTANT:
-   * - NEVER send lat/lng as "".
-   * - Send coords only when you have them.
-   * - Address-only is allowed (endereco/numero/cidade/uf etc).
+   * IMPORTANT: Never send lat/lng empty string.
+   * Send address fields if coords are missing.
    */
-  private buildLocation(input: {
-    endereco: string;
-    numero?: string;
-    bairro?: string;
-    cidade?: string;
-    uf?: string;
-    latitude?: number;
-    longitude?: number;
-  }): Record<string, any> {
+  private buildLocation(input: MachineAddressInput): Record<string, any> {
     const loc: Record<string, any> = {};
 
-    // Address fields
     if (input.endereco) loc.endereco = input.endereco;
     if (input.numero) loc.numero = input.numero;
     if (input.bairro) loc.bairro = input.bairro;
     if (input.cidade) loc.cidade = input.cidade;
     if (input.uf) loc.uf = input.uf;
 
-    // Coords only if present
+    // Coordinates only if present (no empty strings)
     if (input.latitude != null) loc.lat = String(input.latitude);
     if (input.longitude != null) loc.lng = String(input.longitude);
 
     return loc;
   }
 
-  // =========================
-  // Health check
-  // =========================
-
-  async verifyConnection(): Promise<boolean> {
-    try {
-      const response = await this.listWebhooks();
-      return response.success !== false;
-    } catch (error) {
-      logger.error('Machine Global connection verification failed:', error);
-      return false;
-    }
+  /**
+   * Sanitizes phone to digits only
+   */
+  private sanitizePhone(telefone: string): string {
+    return String(telefone || '').replace(/\D/g, '');
   }
 
-  // =========================
-  // Webhooks
-  // =========================
+  /**
+   * Handle errors with clear messages.
+   * 404 in Machine = endpoint/url wrong (per doc).
+   */
+  private handleError(error: unknown): { success: false; errors: string[] } {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const headers = error.response?.headers;
+
+      if (status === 404) {
+        return {
+          success: false,
+          errors: [
+            'Endpoint Not Found (404): URL/endpoint inválido. Verifique baseURL e caminho (ex: /api/integracao/estimarSolicitacao).',
+          ],
+        };
+      }
+
+      if (status === 401) {
+        return { success: false, errors: ['Authentication Failed (401): username/password inválidos.'] };
+      }
+
+      if (status === 403) {
+        const ratedBy = (headers as any)?.['mch-rated-by'];
+        return {
+          success: false,
+          errors: [
+            ratedBy
+              ? `API Access Denied (403): api-key inválida/limitada. mch-rated-by: ${ratedBy}`
+              : 'API Access Denied (403): api-key inválida ou sem permissão.',
+          ],
+        };
+      }
+
+      const msg =
+        (error.response?.data as any)?.message ||
+        (error.response?.data as any)?.errors?.join?.(', ') ||
+        error.message;
+
+      return { success: false, errors: [msg] };
+    }
+
+    return { success: false, errors: [(error as Error)?.message || 'Unknown error'] };
+  }
+
+  // --------------------
+  // WEBHOOKS
+  // --------------------
 
   async listWebhooks(): Promise<WebhookListResponse> {
     try {
-      const response = await this.client.get('/listarWebhook');
-      const data = response.data;
+      const res = await this.client.get(ENDPOINTS.LISTAR_WEBHOOK);
+      const data = res.data;
 
       return {
         success: data.success !== false,
@@ -344,8 +320,8 @@ class MachineGlobalService {
           },
         errors: data.errors,
       };
-    } catch (error) {
-      return this.handleError(error);
+    } catch (e) {
+      return this.handleError(e);
     }
   }
 
@@ -354,85 +330,71 @@ class MachineGlobalService {
     type: 'status' | 'posicao'
   ): Promise<{ success: boolean; errors?: string[] }> {
     try {
-      const response = await this.client.post('/cadastrarWebhook', { url, tipo: type });
-      return response.data;
-    } catch (error) {
-      return this.handleError(error);
+      const res = await this.client.post(ENDPOINTS.CADASTRAR_WEBHOOK, { url, tipo: type });
+      return res.data;
+    } catch (e) {
+      return this.handleError(e);
     }
   }
 
-  async updateWebhook(
-    webhookId: string,
-    url: string
-  ): Promise<{ success: boolean; errors?: string[] }> {
+  async updateWebhook(webhookId: string, url: string): Promise<{ success: boolean; errors?: string[] }> {
     try {
-      const response = await this.client.put(`/atualizarWebhook/${webhookId}`, { url });
-      return response.data;
-    } catch (error) {
-      return this.handleError(error);
+      const res = await this.client.put(ENDPOINTS.ATUALIZAR_WEBHOOK(webhookId), { url });
+      return res.data;
+    } catch (e) {
+      return this.handleError(e);
     }
   }
 
   async deleteWebhook(webhookId: string): Promise<{ success: boolean; errors?: string[] }> {
     try {
-      const response = await this.client.delete(`/deletarWebhook/${webhookId}`);
-      return response.data;
-    } catch (error) {
-      return this.handleError(error);
+      const res = await this.client.delete(ENDPOINTS.DELETAR_WEBHOOK(webhookId));
+      return res.data;
+    } catch (e) {
+      return this.handleError(e);
     }
   }
 
-  // =========================
-  // Quote / Estimate (NO ride created)
-  // =========================
+  // --------------------
+  // ESTIMATIVA / COTAÇÃO
+  // --------------------
 
   /**
-   * ✅ Official endpoint for estimate without opening ride:
+   * Estimate/Quote WITHOUT opening a ride
    * POST /estimarSolicitacao
    */
   async getPriceQuote(data: PriceQuoteRequest): Promise<PriceQuoteResponse> {
-    const endpoint = '/estimarSolicitacao'; // ✅ correct case
-    const fullUrl = `${this.baseURL}${endpoint}`;
-
     const requestPayload: Record<string, any> = {
       categoria_id: data.categoria_id || 4751,
       partida: this.buildLocation(data.origem),
       destino: this.buildLocation(data.destino),
     };
 
-    logger.info(`========== MACHINE PRICE QUOTE REQUEST ==========`); 
-    logger.info(`[MACHINE] POST ${fullUrl}`);
-    logger.info(`[MACHINE] Request Body: ${config.data || ''}`);
-   logger.info(`=================================================`);
+    // Optional: clean empty objects (avoid sending { } with nothing)
+    if (!Object.keys(requestPayload.partida || {}).length) delete requestPayload.partida;
+    if (!Object.keys(requestPayload.destino || {}).length) delete requestPayload.destino;
 
     try {
-      const response = await this.client.post(endpoint, requestPayload);
-
-      logger.info(`========== MACHINE PRICE QUOTE RESPONSE ==========`); 
-      logger.info(`[MACHINE] Status: ${response.status}`);
-      logger.info(`[MACHINE] Response: ${JSON.stringify(response.data, null, 2)}`);
-      logger.info(`==================================================`);
+      const res = await this.client.post(ENDPOINTS.ESTIMAR, requestPayload);
+      const d = res.data;
 
       return {
-        success: response.data.success !== false,
-        cotacao: response.data.cotacao,
-        valor_estimado: response.data.valor_estimado || response.data.cotacao?.valorEstimado,
-        distancia_km: response.data.distancia_km || response.data.cotacao?.distanciaKm,
-        tempo_estimado: response.data.tempo_estimado || response.data.cotacao?.tempoEstimado,
+        success: d.success !== false,
+        cotacao: d.cotacao,
+        valor_estimado: d.valor_estimado ?? d.cotacao?.valorEstimado,
+        distancia_km: d.distancia_km ?? d.cotacao?.distanciaKm,
+        tempo_estimado: d.tempo_estimado ?? d.cotacao?.tempoEstimado,
       };
-    } catch (error: any) {
-      return this.handleErrorVerbose(error, fullUrl, requestPayload);
+    } catch (e) {
+      return this.handleError(e);
     }
   }
 
-  // =========================
-  // Create Ride (opens solicitation)
-  // =========================
+  // --------------------
+  // ABRIR SOLICITAÇÃO
+  // --------------------
 
   async createRide(data: CreateRideRequest): Promise<RideResponse> {
-    const endpoint = '/abrirSolicitacao';
-    const fullUrl = `${this.baseURL}${endpoint}`;
-
     const requestPayload: Record<string, any> = {
       categoria_id: data.categoria_id || 4751,
       forma_pagamento: data.formaPagamento || PAYMENT_METHODS.DINHEIRO,
@@ -446,49 +408,25 @@ class MachineGlobalService {
 
     if (data.observacoes) requestPayload.observacoes = data.observacoes;
 
-    logger.info(`========== MACHINE API REQUEST ==========`); 
-    logger.info(`[MACHINE] POST ${fullUrl}`);
-    logger.info(
-      `[MACHINE] Headers: { "api-key": "${
-        this.apiKey ? this.apiKey.substring(0, 15) + '...' : 'NOT SET'
-      }", "Authorization": "Basic ***" }`
-    );
-    logger.info(`[MACHINE] Auth: { username: "${this.username}", password: "***" }`);
-    logger.info(`[MACHINE] Request Body: ${JSON.stringify(requestPayload, null, 2)}`);
-    logger.info(`=========================================`);
+    // Remove empty location objects
+    if (!Object.keys(requestPayload.partida || {}).length) delete requestPayload.partida;
+    if (!Object.keys(requestPayload.destino || {}).length) delete requestPayload.destino;
 
     try {
-      const response = await this.client.post(endpoint, requestPayload);
-
-      logger.info(`========== MACHINE API RESPONSE ==========`); 
-      logger.info(`[MACHINE] Status: ${response.status} ${response.statusText}`);
-      logger.info(`[MACHINE] Response Body: ${JSON.stringify(response.data, null, 2)}`);
-      logger.info(
-        `[MACHINE] Ride ID: ${
-          response.data?.id ||
-          response.data?.corrida?.id ||
-          response.data?.solicitacao_id ||
-          'NOT FOUND'
-        }`
-      );
-      logger.info(`==========================================`);
-
-      return { success: true, corrida: response.data.corrida || response.data };
-    } catch (error: any) {
-      return this.handleErrorVerbose(error, fullUrl, requestPayload);
+      const res = await this.client.post(ENDPOINTS.ABRIR, requestPayload);
+      const d = res.data;
+      return { success: d.success !== false, corrida: d.corrida || d };
+    } catch (e) {
+      return this.handleError(e);
     }
   }
 
-  // =========================
-  // Ride queries
-  // =========================
-
   async getRideStatus(rideId: string): Promise<RideResponse> {
     try {
-      const response = await this.client.get(`/solicitacao/${rideId}`);
-      return response.data;
-    } catch (error) {
-      return this.handleError(error);
+      const res = await this.client.get(ENDPOINTS.STATUS(rideId));
+      return res.data;
+    } catch (e) {
+      return this.handleError(e);
     }
   }
 
@@ -499,10 +437,10 @@ class MachineGlobalService {
     telefone?: string;
   }): Promise<{ success: boolean; corridas?: any[]; errors?: string[] }> {
     try {
-      const response = await this.client.get('/solicitacao', { params: filters });
-      return response.data;
-    } catch (error) {
-      return this.handleError(error);
+      const res = await this.client.get(ENDPOINTS.LISTAR_SOLICITACOES, { params: filters });
+      return res.data;
+    } catch (e) {
+      return this.handleError(e);
     }
   }
 
@@ -511,13 +449,13 @@ class MachineGlobalService {
     motivo?: string
   ): Promise<{ success: boolean; errors?: string[] }> {
     try {
-      const response = await this.client.post('/cancelar', {
+      const res = await this.client.post(ENDPOINTS.CANCELAR, {
         solicitacao_id: rideId,
         motivo: motivo || 'Cancelado pelo cliente',
       });
-      return response.data;
-    } catch (error) {
-      return this.handleError(error);
+      return res.data;
+    } catch (e) {
+      return this.handleError(e);
     }
   }
 
@@ -525,19 +463,19 @@ class MachineGlobalService {
     rideId: string
   ): Promise<{ success: boolean; posicao?: { latitude: number; longitude: number }; errors?: string[] }> {
     try {
-      const response = await this.client.get(`/posicaoCondutor/${rideId}`);
-      return response.data;
-    } catch (error) {
-      return this.handleError(error);
+      const res = await this.client.get(ENDPOINTS.POSICAO_CONDUTOR(rideId));
+      return res.data;
+    } catch (e) {
+      return this.handleError(e);
     }
   }
 
   async listDrivers(): Promise<{ success: boolean; condutores?: any[]; errors?: string[] }> {
     try {
-      const response = await this.client.get('/condutor');
-      return response.data;
-    } catch (error) {
-      return this.handleError(error);
+      const res = await this.client.get(ENDPOINTS.CONDUTORES);
+      return res.data;
+    } catch (e) {
+      return this.handleError(e);
     }
   }
 
@@ -545,126 +483,13 @@ class MachineGlobalService {
     telefone: string
   ): Promise<{ success: boolean; cliente?: any; errors?: string[] }> {
     try {
-      const response = await this.client.get('/cliente', { params: { telefone } });
-      return response.data;
-    } catch (error) {
-      return this.handleError(error);
+      const res = await this.client.get(ENDPOINTS.CLIENTE, {
+        params: { telefone: this.sanitizePhone(telefone) },
+      });
+      return res.data;
+    } catch (e) {
+      return this.handleError(e);
     }
-  }
-
-  // =========================
-  // Error handlers
-  // =========================
-
-  private handleErrorVerbose(
-    error: unknown,
-    fullUrl: string,
-    requestPayload?: any
-  ): { success: false; errors: string[] } {
-    logger.error(`========== MACHINE API ERROR ==========`); 
-    logger.error(`[MACHINE] REQUEST FAILED: ${fullUrl}`);
-    if (requestPayload) {
-      logger.error(`[MACHINE] Request Body: ${JSON.stringify(requestPayload, null, 2)}`);
-    }
-
-    if (axios.isAxiosError(error)) {
-      const status = error.response?.status;
-      const headers = error.response?.headers;
-      const data: any = error.response?.data;
-
-      logger.error(`[MACHINE] Status: ${status}`);
-      logger.error(`[MACHINE] Headers: ${JSON.stringify(headers)}`);
-      logger.error(`[MACHINE] Error Response: ${JSON.stringify(data)}`);
-
-      let errorMessage = error.message;
-
-      if (status === 403) {
-        const ratedBy = (headers as any)?.['mch-rated-by'];
-        errorMessage = ratedBy
-          ? `API Access Denied (403): API key may be rate-limited or invalid. Header: ${ratedBy}.`
-          : 'API Access Denied (403): Invalid credentials or API key.';
-      } else if (status === 401) {
-        errorMessage = 'Authentication Failed (401): Invalid username or password.';
-      } else if (status === 404) {
-        errorMessage = 'Endpoint Not Found (404): Check baseURL and endpoint path.';
-      } else if (data?.errors?.length) {
-        errorMessage = Array.isArray(data.errors) ? data.errors.join(' | ') : String(data.errors);
-      } else if (data?.message) {
-        errorMessage = String(data.message);
-      }
-
-      logger.error(`========================================`);
-      return { success: false, errors: [errorMessage] };
-    }
-
-    const msg = (error as Error)?.message || 'Unknown error';
-    logger.error(`[MACHINE] Non-HTTP Error: ${msg}`);
-    logger.error(`========================================`);
-    return { success: false, errors: [msg] };
-  }
-
-  private handleError(error: unknown): { success: false; errors: string[] } {
-    if (axios.isAxiosError(error)) {
-      const axiosError = error as AxiosError<{ errors?: string[]; message?: string }>;
-      const status = axiosError.response?.status;
-      const headers = axiosError.response?.headers;
-
-      let errorMessage: string;
-
-      if (status === 403) {
-        const ratedBy = (headers as any)?.['mch-rated-by'];
-        errorMessage = ratedBy
-          ? `API Access Denied (403): API key may be rate-limited or invalid. Header: ${ratedBy}.`
-          : 'API Access Denied (403): Invalid credentials or API key.';
-      } else if (status === 401) {
-        errorMessage = 'Authentication Failed (401): Invalid username or password.';
-      } else if (status === 404) {
-        errorMessage = 'Endpoint Not Found (404): Check baseURL and endpoint path.';
-      } else {
-        const errors = axiosError.response?.data?.errors || [
-          axiosError.response?.data?.message || axiosError.message,
-        ];
-        return { success: false, errors };
-      }
-
-      return { success: false, errors: [errorMessage] };
-    }
-
-    return { success: false, errors: [(error as Error).message] };
-  }
-
-  // =========================
-  // Status mapping
-  // =========================
-
-  static mapStatus(machineStatus: string): string {
-    const statusMap: Record<string, string> = {
-      D: 'DISTRIBUTING',
-      G: 'AWAITING_ACCEPT',
-      P: 'PENDING',
-      N: 'NO_DRIVER',
-      A: 'ACCEPTED',
-      E: 'IN_PROGRESS',
-      F: 'COMPLETED',
-      C: 'CANCELLED',
-      R: 'AWAITING_PAYMENT',
-    };
-    return statusMap[machineStatus] || 'REQUESTED';
-  }
-
-  static reverseMapStatus(status: string): string {
-    const statusMap: Record<string, string> = {
-      DISTRIBUTING: 'D',
-      AWAITING_ACCEPT: 'G',
-      PENDING: 'P',
-      NO_DRIVER: 'N',
-      ACCEPTED: 'A',
-      IN_PROGRESS: 'E',
-      COMPLETED: 'F',
-      CANCELLED: 'C',
-      AWAITING_PAYMENT: 'R',
-    };
-    return statusMap[status] || 'D';
   }
 }
 
