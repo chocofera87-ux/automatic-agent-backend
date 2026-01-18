@@ -1,7 +1,9 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { AxiosError, AxiosInstance } from 'axios';
 import { logger } from '../utils/logger.js';
 
+// =========================
 // Types for Machine Global API
+// =========================
 
 export interface MachineAddress {
   endereco: string;
@@ -9,8 +11,8 @@ export interface MachineAddress {
   bairro?: string;
   cidade?: string;
   uf?: string;
-  lat?: string;
-  lng?: string;
+  lat?: string; // legacy
+  lng?: string; // legacy
 }
 
 export interface MachineCliente {
@@ -147,8 +149,13 @@ export const RIDE_STATUS = {
   AGUARDANDO_PAGAMENTO: 'R',
 } as const;
 
+// =========================
+// Service
+// =========================
+
 class MachineGlobalService {
-  private client: AxiosInstance;
+  private client!: AxiosInstance;
+
   private apiKey: string;
   private username: string;
   private password: string;
@@ -159,12 +166,36 @@ class MachineGlobalService {
     this.username = process.env.MACHINE_GLOBAL_USERNAME || '';
     this.password = process.env.MACHINE_GLOBAL_PASSWORD || '';
 
-    // IMPORTANT: baseURL must include /api/integracao
-    // Example: https://api.taximachine.com.br/api/integracao
-    this.baseURL =
-      process.env.MACHINE_GLOBAL_BASE_URL || 'https://api.taximachine.com.br/api/integracao';
+    // ✅ Production-ready:
+    // Set MACHINE_GLOBAL_BASE_URL to either:
+    // - https://api.taximachine.com.br (prod)
+    // - https://api-trial.taximachine.com.br (trial)
+    // - OR already including /api/integracao
+    this.baseURL = this.normalizeBaseURL(
+      process.env.MACHINE_GLOBAL_BASE_URL || 'https://api.taximachine.com.br'
+    );
 
     this.client = this.createClient();
+
+    logger.info(`[MACHINE] Service initialized.`);
+    logger.info(`[MACHINE] BaseURL: ${this.baseURL}`);
+    logger.info(
+      `[MACHINE] API Key: ${this.apiKey ? `SET (${this.apiKey.substring(0, 10)}...)` : 'NOT SET'}`
+    );
+    logger.info(`[MACHINE] Username: ${this.username ? 'SET' : 'NOT SET'}`);
+  }
+
+  // Guarantees exactly one /api/integracao and no trailing slashes
+  private normalizeBaseURL(input: string): string {
+    const raw = (input || '').trim().replace(/\/+$/, '');
+
+    if (!raw) return 'https://api.taximachine.com.br/api/integracao';
+
+    if (raw.includes('/api/integracao')) {
+      return raw.replace(/(\/api\/integracao)+/g, '/api/integracao');
+    }
+
+    return `${raw}/api/integracao`;
   }
 
   private createClient(): AxiosInstance {
@@ -181,14 +212,14 @@ class MachineGlobalService {
       },
     });
 
-    // Request interceptor for logging
+    // Request logging
     client.interceptors.request.use(
       (config) => {
         const base = config.baseURL || '';
         const url = config.url || '';
         const fullUrl = `${base.replace(/\/$/, '')}/${url.replace(/^\//, '')}`;
 
-        logger.info(`Machine API Request: ${config.method?.toUpperCase()} ${config.url}`);
+        logger.info(`Machine API Request: ${String(config.method || '').toUpperCase()} ${url}`);
         logger.info(`[MACHINE] FULL URL: ${fullUrl}`);
 
         return config;
@@ -199,7 +230,7 @@ class MachineGlobalService {
       }
     );
 
-    // Response interceptor for logging
+    // Response logging
     client.interceptors.response.use(
       (response) => {
         logger.info(`Machine API Response: ${response.status} ${response.config.url}`);
@@ -220,7 +251,7 @@ class MachineGlobalService {
     this.password = password;
 
     if (baseURL) {
-      this.baseURL = baseURL.replace(/\/$/, '');
+      this.baseURL = this.normalizeBaseURL(baseURL);
     }
 
     this.client = this.createClient();
@@ -231,16 +262,62 @@ class MachineGlobalService {
     return !!(this.apiKey && this.username && this.password);
   }
 
+  // =========================
+  // Helpers
+  // =========================
+
+  private sanitizePhone(phone: string): string {
+    return (phone || '').replace(/\D/g, '');
+  }
+
+  /**
+   * IMPORTANT:
+   * - NEVER send lat/lng as "".
+   * - Send coords only when you have them.
+   * - Address-only is allowed (endereco/numero/cidade/uf etc).
+   */
+  private buildLocation(input: {
+    endereco: string;
+    numero?: string;
+    bairro?: string;
+    cidade?: string;
+    uf?: string;
+    latitude?: number;
+    longitude?: number;
+  }): Record<string, any> {
+    const loc: Record<string, any> = {};
+
+    // Address fields
+    if (input.endereco) loc.endereco = input.endereco;
+    if (input.numero) loc.numero = input.numero;
+    if (input.bairro) loc.bairro = input.bairro;
+    if (input.cidade) loc.cidade = input.cidade;
+    if (input.uf) loc.uf = input.uf;
+
+    // Coords only if present
+    if (input.latitude != null) loc.lat = String(input.latitude);
+    if (input.longitude != null) loc.lng = String(input.longitude);
+
+    return loc;
+  }
+
+  // =========================
+  // Health check
+  // =========================
+
   async verifyConnection(): Promise<boolean> {
     try {
       const response = await this.listWebhooks();
-      if (response.success === false) return false;
-      return true;
+      return response.success !== false;
     } catch (error) {
       logger.error('Machine Global connection verification failed:', error);
       return false;
     }
   }
+
+  // =========================
+  // Webhooks
+  // =========================
 
   async listWebhooks(): Promise<WebhookListResponse> {
     try {
@@ -266,10 +343,7 @@ class MachineGlobalService {
     type: 'status' | 'posicao'
   ): Promise<{ success: boolean; errors?: string[] }> {
     try {
-      const response = await this.client.post('/cadastrarWebhook', {
-        url,
-        tipo: type,
-      });
+      const response = await this.client.post('/cadastrarWebhook', { url, tipo: type });
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -297,22 +371,22 @@ class MachineGlobalService {
     }
   }
 
+  // =========================
+  // Quote / Estimate (NO ride created)
+  // =========================
+
+  /**
+   * ✅ Official endpoint for estimate without opening ride:
+   * POST /estimarSolicitacao
+   */
   async getPriceQuote(data: PriceQuoteRequest): Promise<PriceQuoteResponse> {
-    const endpoint = '/estimarsolicitacao';
+    const endpoint = '/estimarSolicitacao'; // ✅ correct case
     const fullUrl = `${this.baseURL}${endpoint}`;
 
     const requestPayload: Record<string, any> = {
       categoria_id: data.categoria_id || 4751,
-      partida: {
-        lat: data.origem.latitude?.toString() || '',
-        lng: data.origem.longitude?.toString() || '',
-        endereco: data.origem.endereco,
-      },
-      destino: {
-        lat: data.destino.latitude?.toString() || '',
-        lng: data.destino.longitude?.toString() || '',
-        endereco: data.destino.endereco,
-      },
+      partida: this.buildLocation(data.origem),
+      destino: this.buildLocation(data.destino),
     };
 
     logger.info(`========== MACHINE PRICE QUOTE REQUEST ==========`); 
@@ -336,38 +410,13 @@ class MachineGlobalService {
         tempo_estimado: response.data.tempo_estimado || response.data.cotacao?.tempoEstimado,
       };
     } catch (error: any) {
-      logger.error(`========== MACHINE PRICE QUOTE ERROR ==========`); 
-      logger.error(`[MACHINE] POST ${fullUrl} FAILED`);
-
-      let errorMessage = error.message;
-
-      if (axios.isAxiosError(error)) {
-        const status = error.response?.status;
-        const headers = error.response?.headers;
-
-        logger.error(`[MACHINE] Status: ${status}`);
-        logger.error(`[MACHINE] Headers: ${JSON.stringify(headers)}`);
-        logger.error(`[MACHINE] Error: ${JSON.stringify(error.response?.data)}`);
-
-        if (status === 403) {
-          const ratedBy = (headers as any)?.['mch-rated-by'];
-          errorMessage = ratedBy
-            ? `API Access Denied (403): API key may be rate-limited or invalid. Header: ${ratedBy}.`
-            : 'API Access Denied (403): Invalid credentials or API key.';
-        } else if (status === 401) {
-          errorMessage = 'Authentication Failed (401): Invalid username or password.';
-        } else if (status === 404) {
-          errorMessage = 'Endpoint Not Found (404): Check baseURL and endpoint path.';
-        }
-      } else {
-        logger.error(`[MACHINE] Error: ${error.message}`);
-      }
-
-      logger.error(`================================================`);
-
-      return { success: false, errors: [errorMessage] };
+      return this.handleErrorVerbose(error, fullUrl, requestPayload);
     }
   }
+
+  // =========================
+  // Create Ride (opens solicitation)
+  // =========================
 
   async createRide(data: CreateRideRequest): Promise<RideResponse> {
     const endpoint = '/abrirSolicitacao';
@@ -378,18 +427,10 @@ class MachineGlobalService {
       forma_pagamento: data.formaPagamento || PAYMENT_METHODS.DINHEIRO,
       cliente: {
         nome: data.passageiro.nome,
-        telefone: data.passageiro.telefone.replace(/\D/g, ''),
+        telefone: this.sanitizePhone(data.passageiro.telefone),
       },
-      partida: {
-        lat: data.origem.latitude?.toString() || '',
-        lng: data.origem.longitude?.toString() || '',
-        endereco: data.origem.endereco,
-      },
-      destino: {
-        lat: data.destino.latitude?.toString() || '',
-        lng: data.destino.longitude?.toString() || '',
-        endereco: data.destino.endereco,
-      },
+      partida: this.buildLocation(data.origem),
+      destino: this.buildLocation(data.destino),
     };
 
     if (data.observacoes) requestPayload.observacoes = data.observacoes;
@@ -413,30 +454,23 @@ class MachineGlobalService {
       logger.info(`[MACHINE] Response Body: ${JSON.stringify(response.data, null, 2)}`);
       logger.info(
         `[MACHINE] Ride ID: ${
-          response.data?.id || response.data?.corrida?.id || response.data?.solicitacao_id || 'NOT FOUND'
+          response.data?.id ||
+          response.data?.corrida?.id ||
+          response.data?.solicitacao_id ||
+          'NOT FOUND'
         }`
       );
       logger.info(`==========================================`);
 
       return { success: true, corrida: response.data.corrida || response.data };
     } catch (error: any) {
-      logger.error(`========== MACHINE API ERROR ==========`); 
-      logger.error(`[MACHINE] POST ${fullUrl} FAILED`);
-
-      if (axios.isAxiosError(error)) {
-        logger.error(`[MACHINE] Status: ${error.response?.status} ${error.response?.statusText}`);
-        logger.error(`[MACHINE] Error Response: ${JSON.stringify(error.response?.data, null, 2)}`);
-        logger.error(`[MACHINE] Request that failed: ${JSON.stringify(requestPayload, null, 2)}`);
-      } else {
-        logger.error(`[MACHINE] Non-HTTP Error: ${error.message}`);
-        logger.error(`[MACHINE] Stack: ${error.stack}`);
-      }
-
-      logger.error(`========================================`);
-
-      return this.handleError(error);
+      return this.handleErrorVerbose(error, fullUrl, requestPayload);
     }
   }
+
+  // =========================
+  // Ride queries
+  // =========================
 
   async getRideStatus(rideId: string): Promise<RideResponse> {
     try {
@@ -496,13 +530,66 @@ class MachineGlobalService {
     }
   }
 
-  async getCustomer(telefone: string): Promise<{ success: boolean; cliente?: any; errors?: string[] }> {
+  async getCustomer(
+    telefone: string
+  ): Promise<{ success: boolean; cliente?: any; errors?: string[] }> {
     try {
       const response = await this.client.get('/cliente', { params: { telefone } });
       return response.data;
     } catch (error) {
       return this.handleError(error);
     }
+  }
+
+  // =========================
+  // Error handlers
+  // =========================
+
+  private handleErrorVerbose(
+    error: unknown,
+    fullUrl: string,
+    requestPayload?: any
+  ): { success: false; errors: string[] } {
+    logger.error(`========== MACHINE API ERROR ==========`); 
+    logger.error(`[MACHINE] REQUEST FAILED: ${fullUrl}`);
+    if (requestPayload) {
+      logger.error(`[MACHINE] Request Body: ${JSON.stringify(requestPayload, null, 2)}`);
+    }
+
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const headers = error.response?.headers;
+      const data: any = error.response?.data;
+
+      logger.error(`[MACHINE] Status: ${status}`);
+      logger.error(`[MACHINE] Headers: ${JSON.stringify(headers)}`);
+      logger.error(`[MACHINE] Error Response: ${JSON.stringify(data)}`);
+
+      let errorMessage = error.message;
+
+      if (status === 403) {
+        const ratedBy = (headers as any)?.['mch-rated-by'];
+        errorMessage = ratedBy
+          ? `API Access Denied (403): API key may be rate-limited or invalid. Header: ${ratedBy}.`
+          : 'API Access Denied (403): Invalid credentials or API key.';
+      } else if (status === 401) {
+        errorMessage = 'Authentication Failed (401): Invalid username or password.';
+      } else if (status === 404) {
+        errorMessage = 'Endpoint Not Found (404): Check baseURL and endpoint path.';
+      } else if (data?.errors?.length) {
+        errorMessage = Array.isArray(data.errors) ? data.errors.join(' | ') : String(data.errors);
+      } else if (data?.message) {
+        errorMessage = String(data.message);
+      }
+
+      logger.error(`========================================`);
+      return { success: false, errors: [errorMessage] };
+    }
+
+    const msg = (error as Error)?.message || 'Unknown error';
+    logger.error(`[MACHINE] Non-HTTP Error: ${msg}`);
+    logger.error(`========================================`);
+    return { success: false, errors: [msg] };
   }
 
   private handleError(error: unknown): { success: false; errors: string[] } {
@@ -534,6 +621,10 @@ class MachineGlobalService {
 
     return { success: false, errors: [(error as Error).message] };
   }
+
+  // =========================
+  // Status mapping
+  // =========================
 
   static mapStatus(machineStatus: string): string {
     const statusMap: Record<string, string> = {
@@ -567,3 +658,4 @@ class MachineGlobalService {
 }
 
 export const machineGlobalService = new MachineGlobalService();
+
